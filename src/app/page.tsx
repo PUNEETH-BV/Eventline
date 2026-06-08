@@ -251,6 +251,20 @@ export default function Home() {
       .catch(() => triggerToast('Failed to copy link.'));
   }, [searchedQuery, triggerToast]);
 
+  // Handle updates when voice search results are returned
+  const handleVoiceSearchResult = useCallback((voiceQuery: string, voiceEvents: TimelineEvent[]) => {
+    setQuery(voiceQuery);
+    setSearchedQuery(voiceQuery);
+    setEvents(voiceEvents);
+    setError('');
+    setHasSearched(true);
+    setActiveTab('search');
+
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', `?q=${encodeURIComponent(voiceQuery)}`);
+    }
+  }, []);
+
   // Layer CSS classes
   const getLayerClass = (layer: number) => {
     if (layer === activeLayer) return 'layer-base layer-active';
@@ -427,7 +441,8 @@ export default function Home() {
       {showVoiceSearch && (
         <VoiceSearchModal
           onClose={() => setShowVoiceSearch(false)}
-          onSearch={(voiceQuery) => handleSearch(voiceQuery)}
+          onSearch={handleVoiceSearchResult}
+          currentEvents={events}
         />
       )}
 
