@@ -9,7 +9,7 @@ interface VoiceSearchModalProps {
   currentEvents: TimelineEvent[];
 }
 
-type ModalStatus = 'connecting' | 'listening' | 'processing' | 'error';
+type ModalStatus = 'connecting' | 'listening' | 'processing' | 'error' | 'speaking';
 
 interface LogMessage {
   role: 'assistant' | 'system';
@@ -27,6 +27,11 @@ export default function VoiceSearchModal({ onClose, onSearch, currentEvents }: V
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const isModelRespondingRef = useRef<boolean>(false);
+  const lastSpokenTimeRef = useRef<number>(Date.now());
+  const hasSpokenRef = useRef<boolean>(false);
+  const isAudioPausedRef = useRef<boolean>(false);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const silenceIntervalRef = useRef<any>(null);
 
   // Auto-scroll to bottom of conversation transcript
   useEffect(() => {
@@ -34,6 +39,54 @@ export default function VoiceSearchModal({ onClose, onSearch, currentEvents }: V
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [transcript]);
+
+  // Speak response back using browser native Text-To-Speech (SpeechSynthesis)
+  const speakResponse = (text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) {
+      isAudioPausedRef.current = false;
+      lastSpokenTimeRef.current = Date.now();
+      hasSpokenRef.current = false;
+      setStatus('listening');
+      return;
+    }
+
+    try {
+      window.speechSynthesis.cancel();
+      setStatus('speaking');
+
+      // Remove markdown, symbols or code formatting for cleaner speech synthesis
+      const cleanText = text
+        .replace(/[*#_`~-]/g, '')
+        .replace(/\[.*?\]/g, '')
+        .replace(/\(.*?\)/g, '')
+        .trim();
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utteranceRef.current = utterance;
+
+      utterance.onend = () => {
+        isAudioPausedRef.current = false;
+        lastSpokenTimeRef.current = Date.now();
+        hasSpokenRef.current = false;
+        setStatus('listening');
+      };
+
+      utterance.onerror = () => {
+        isAudioPausedRef.current = false;
+        lastSpokenTimeRef.current = Date.now();
+        hasSpokenRef.current = false;
+        setStatus('listening');
+      };
+
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      console.error('TTS speaking error:', err);
+      isAudioPausedRef.current = false;
+      lastSpokenTimeRef.current = Date.now();
+      hasSpokenRef.current = false;
+      setStatus('listening');
+    }
+  };
 
   // Initialize voice connection
   useEffect(() => {
@@ -130,6 +183,36 @@ ${currentResultsContext}`,
           ws.send(JSON.stringify(setupMsg));
           setStatus('listening');
           setTranscript([{ role: 'assistant', text: 'Hello! I am your EventLine voice assistant. You can speak to search or discuss current results.' }]);
+          
+          // Initialize silence tracking variables
+          lastSpokenTimeRef.current = Date.now();
+          hasSpokenRef.current = false;
+          isAudioPausedRef.current = false;
+
+          // Start client-side silence checking interval (detects 5 second silence gap)
+          silenceIntervalRef.current = setInterval(() => {
+            if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+            if (isAudioPausedRef.current) return;
+            if (!hasSpokenRef.current) return;
+
+            const now = Date.now();
+            const silenceDuration = now - lastSpokenTimeRef.current;
+
+            if (silenceDuration > 5000) {
+              console.log("5 seconds silence detected, requesting model analysis...");
+              hasSpokenRef.current = false;
+              isAudioPausedRef.current = true;
+              setStatus('processing');
+
+              const turnCompleteMsg = {
+                clientContent: {
+                  turnComplete: true
+                }
+              };
+              wsRef.current.send(JSON.stringify(turnCompleteMsg));
+            }
+          }, 200);
+
           startAudioStreaming(stream);
         };
 
@@ -165,6 +248,18 @@ ${currentResultsContext}`,
 
             if (data.serverContent?.modelTurn?.turnComplete) {
               isModelRespondingRef.current = false;
+              
+              // Find the last assistant message and read it aloud
+              setTranscript(prev => {
+                const assistantMessages = prev.filter(m => m.role === 'assistant');
+                if (assistantMessages.length > 0) {
+                  const lastText = assistantMessages[assistantMessages.length - 1].text;
+                  setTimeout(() => {
+                    speakResponse(lastText);
+                  }, 50);
+                }
+                return prev;
+              });
             }
 
             if (data.serverContent?.interrupted) {
@@ -307,9 +402,22 @@ ${currentResultsContext}`,
 
       processor.onaudioprocess = (e) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+        if (isAudioPausedRef.current) return;
 
         const inputData = e.inputBuffer.getChannelData(0); // Float32Array
         
+        // Calculate RMS volume to detect speaking
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          sum += inputData[i] * inputData[i];
+        }
+        const rms = Math.sqrt(sum / inputData.length);
+        
+        if (rms > 0.01) {
+          lastSpokenTimeRef.current = Date.now();
+          hasSpokenRef.current = true;
+        }
+
         // Convert to Int16 PCM
         const pcm16 = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
@@ -327,12 +435,12 @@ ${currentResultsContext}`,
         }
         const base64Data = btoa(binary);
 
-        // Send PCM data chunk
+        // Send PCM data chunk with rate parameter
         const mediaMsg = {
           realtimeInput: {
             mediaChunks: [
               {
-                mimeType: 'audio/pcm',
+                mimeType: 'audio/pcm;rate=16000',
                 data: base64Data,
               },
             ],
@@ -350,6 +458,13 @@ ${currentResultsContext}`,
   // Cleanup helper
   const cleanup = () => {
     isModelRespondingRef.current = false;
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    if (silenceIntervalRef.current) {
+      clearInterval(silenceIntervalRef.current);
+      silenceIntervalRef.current = null;
+    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -449,6 +564,26 @@ ${currentResultsContext}`,
             </div>
           )}
 
+          {status === 'speaking' && (
+            <div className="relative flex items-center justify-center w-24 h-24">
+              {/* Concentric pulsing rings for speaking (purple/blue) */}
+              <div className="absolute inset-0 rounded-full bg-purple-500/10 animate-wave-slow border border-purple-500/20" />
+              <div className="absolute inset-2 rounded-full bg-purple-500/20 animate-wave-medium border border-purple-500/35" />
+              <div className="absolute inset-4 rounded-full bg-purple-500/30 animate-wave-fast border border-purple-500/50" />
+              {/* Center Icon */}
+              <div className="relative z-10 w-11 h-11 rounded-full bg-gradient-to-tr from-purple-600 to-blue-600 flex items-center justify-center text-white shadow-xl shadow-purple-500/20">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                  className="w-5 h-5 animate-pulse"
+                >
+                  <path d="M13.5 4.06c0-1.336-1.616-2.005-2.56-1.06l-4.5 4.5H4.508c-1.141 0-2.063.922-2.063 2.063v4.875c0 1.141.922 2.062 2.063 2.062h1.932l4.5 4.5c.944.945 2.56.276 2.56-1.06V4.06ZM17.78 9.22a.75.75 0 1 0-1.06 1.06L18.44 12l-1.72 1.72a.75.75 0 0 0 1.06 1.06l1.72-1.72 1.72 1.72a.75.75 0 1 0 1.06-1.06L20.56 12l1.72-1.72a.75.75 0 0 0-1.06-1.06l-1.72 1.72-1.72-1.72Z" />
+                </svg>
+              </div>
+            </div>
+          )}
+
           {status === 'error' && (
             <div className="flex flex-col items-center gap-2 text-red-400 px-6">
               <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center border border-red-500/40">
@@ -473,6 +608,11 @@ ${currentResultsContext}`,
           {status === 'listening' && (
             <p className="text-gray-500 text-[11px]">
               Speak naturally to search timelines or explore facts.
+            </p>
+          )}
+          {status === 'speaking' && (
+            <p className="text-gray-500 text-[11px]">
+              Speaking response aloud. Speak when microphone returns...
             </p>
           )}
           {status === 'error' && (
