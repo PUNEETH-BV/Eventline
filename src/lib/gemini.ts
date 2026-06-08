@@ -113,9 +113,9 @@ export async function generateContentWithFallback(params: GenerateContentParams)
         }
       }
 
-      let openRouterModel = 'google/gemini-2.5-flash:free';
+      let openRouterModel = 'openrouter/free';
       if (params.model.includes('flash')) {
-        openRouterModel = 'google/gemini-2.5-flash:free';
+        openRouterModel = 'openrouter/free';
       }
 
       const openRouterRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
