@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 import type { ChatMessage } from '@/types';
 
-const apiKey = process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your-anthropic-api-key-here'
-  ? process.env.ANTHROPIC_API_KEY
-  : 'ollama';
+const apiKey = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your-gemini-api-key-here'
+  ? process.env.GEMINI_API_KEY
+  : undefined;
 
-const client = new Anthropic({
+const ai = new GoogleGenAI({
   apiKey,
-  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
+  httpOptions: process.env.GEMINI_BASE_URL ? { baseUrl: process.env.GEMINI_BASE_URL } : undefined,
 });
 
-const MODEL_NAME = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 export async function POST(request: Request) {
   try {
@@ -30,30 +30,23 @@ export async function POST(request: Request) {
       );
     }
 
-    const response = await client.messages.create({
+    // Convert messages to Gemini format (role is 'user' or 'model')
+    const contents = messages.map(msg => ({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }]
+    }));
+
+    // Generate content
+    const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      max_tokens: 2048,
-      tools: [
-        {
-          type: 'web_search_20250305',
-          name: 'web_search',
-          max_uses: 3,
-        },
-      ],
-      system: `You are an expert assistant. The user is asking about a specific event: ${eventTitle} on ${eventDate}. Event context: ${eventDescription}. Answer all questions in context of this event only. Be concise, factual, and helpful. Use web search when needed for current information.`,
-      messages: messages.map((msg) => ({
-        role: msg.role as 'user' | 'assistant',
-        content: msg.content,
-      })),
+      contents,
+      config: {
+        systemInstruction: `You are an expert assistant. The user is asking about a specific event: ${eventTitle} on ${eventDate}. Event context: ${eventDescription}. Answer all questions in context of this event only. Be concise, factual, and helpful. Use Google Search when needed for current information.`,
+        tools: [{ googleSearch: {} }],
+      },
     });
 
-    // Extract the assistant's text response
-    let messageText = '';
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        messageText += block.text;
-      }
-    }
+    const messageText = response.text || '';
 
     return NextResponse.json({ message: messageText });
   } catch (error) {

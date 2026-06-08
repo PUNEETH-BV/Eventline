@@ -1,17 +1,17 @@
 import { NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI } from '@google/genai';
 import type { TimelineEvent } from '@/types';
 
-const apiKey = process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY !== 'your-anthropic-api-key-here'
-  ? process.env.ANTHROPIC_API_KEY
-  : 'ollama';
+const apiKey = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your-gemini-api-key-here'
+  ? process.env.GEMINI_API_KEY
+  : undefined;
 
-const client = new Anthropic({
+const ai = new GoogleGenAI({
   apiKey,
-  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
+  httpOptions: process.env.GEMINI_BASE_URL ? { baseUrl: process.env.GEMINI_BASE_URL } : undefined,
 });
 
-const MODEL_NAME = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
 export async function POST(request: Request) {
   try {
@@ -26,32 +26,17 @@ export async function POST(request: Request) {
 
     const todayDate = new Date().toISOString().split('T')[0];
 
-    const response = await client.messages.create({
+    const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      max_tokens: 4096,
-      tools: [
-        {
-          type: 'web_search_20250305',
-          name: 'web_search',
-          max_uses: 5,
-        },
-      ],
-      system: `You are an event research assistant. When given a search query, use web search to find ALL related important dates, deadlines, and milestones. Return ONLY a valid JSON array sorted by date (earliest first). Each object must have: title (string), date (ISO format YYYY-MM-DD), description (max 20 words), status (past/present/future relative to today's date which is ${todayDate}), category (one of: exam/deadline/result/announcement/event). Return ONLY the JSON array, no other text.`,
-      messages: [
-        {
-          role: 'user',
-          content: query,
-        },
-      ],
+      contents: query,
+      config: {
+        systemInstruction: `You are an event research assistant. When given a search query, use Google Search grounding to find ALL related important dates, deadlines, and milestones. Return ONLY a valid JSON array sorted by date (earliest first). Each object must have: title (string), date (ISO format YYYY-MM-DD), description (max 20 words), status (past/present/future relative to today's date which is ${todayDate}), category (one of: exam/deadline/result/announcement/event). Return ONLY the JSON array, no other text.`,
+        tools: [{ googleSearch: {} }],
+        responseMimeType: 'application/json',
+      },
     });
 
-    // Extract text blocks from the response content
-    let fullText = '';
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        fullText += block.text;
-      }
-    }
+    const fullText = response.text || '';
 
     // Find and parse the JSON array from the response text
     const jsonMatch = fullText.match(/\[[\s\S]*\]/);
