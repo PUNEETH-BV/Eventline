@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { TimelineEvent, ChatMessage, ActiveTab } from '@/types';
 import { useBookmarks } from '@/hooks/useBookmarks';
 import { useLayerNavigation } from '@/hooks/useLayerNavigation';
@@ -12,6 +12,7 @@ import EventDetailPanel from '@/components/EventDetailPanel';
 import DigDeeperChat from '@/components/DigDeeperChat';
 import BottomNav from '@/components/BottomNav';
 import SavedEvents from '@/components/SavedEvents';
+import VoiceSearchModal from '@/components/VoiceSearchModal';
 
 export default function Home() {
   // Search state
@@ -38,6 +39,17 @@ export default function Home() {
   // Active tab (mobile nav)
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
 
+  // New states for v2: voice search modal & toast notifications
+  const [showVoiceSearch, setShowVoiceSearch] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+
+  const triggerToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage('');
+    }, 2000);
+  }, []);
+
   // Search handler
   const handleSearch = useCallback(async (searchQuery?: string) => {
     const q = searchQuery || query;
@@ -50,6 +62,11 @@ export default function Home() {
     setHasSearched(true);
     setEvents([]);
     setActiveTab('search');
+
+    // Update URL query parameters without reloading the page
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', `?q=${encodeURIComponent(q)}`);
+    }
 
     try {
       const res = await fetch('/api/search', {
@@ -75,6 +92,21 @@ export default function Home() {
       setLoading(false);
     }
   }, [query]);
+
+  // Read URL search query on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('q');
+      if (q) {
+        setQuery(q);
+        // We delay slightly to ensure component is fully mounted
+        setTimeout(() => {
+          handleSearch(q);
+        }, 100);
+      }
+    }
+  }, [handleSearch]);
 
   // Chip click handler
   const handleChipClick = useCallback((chipQuery: string) => {
@@ -125,7 +157,6 @@ export default function Home() {
   const handleDigDeeperChat = useCallback(() => {
     if (!selectedEvent) return;
 
-    // Auto-send first message if no history exists
     const eventId = selectedEvent.id;
     if (!chatHistories[eventId] || chatHistories[eventId].length === 0) {
       const firstMessage = `Tell me everything important about: ${selectedEvent.title} on ${selectedEvent.date}. Context: ${selectedEvent.description}`;
@@ -134,7 +165,6 @@ export default function Home() {
         [eventId]: [{ role: 'user', content: firstMessage }],
       }));
 
-      // Send to API
       openChat();
       sendChatMessage(eventId, firstMessage, []);
     } else {
@@ -210,6 +240,17 @@ export default function Home() {
     sendChatMessage(eventId, message, existing);
   }, [selectedEvent, chatHistories, sendChatMessage]);
 
+  // Share timeline link
+  const handleShareTimeline = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (typeof window === 'undefined') return;
+
+    const shareUrl = `${window.location.origin}/?q=${encodeURIComponent(searchedQuery)}`;
+    navigator.clipboard.writeText(shareUrl)
+      .then(() => triggerToast('Link copied!'))
+      .catch(() => triggerToast('Failed to copy link.'));
+  }, [searchedQuery, triggerToast]);
+
   // Layer CSS classes
   const getLayerClass = (layer: number) => {
     if (layer === activeLayer) return 'layer-base layer-active';
@@ -218,17 +259,16 @@ export default function Home() {
     return 'layer-base layer-active';
   };
 
-  // Show saved view
   const showSaved = activeTab === 'saved';
   const showHome = !hasSearched && activeTab !== 'saved';
   const showTimeline = hasSearched && !showSaved;
 
   return (
-    <main className="min-h-screen bg-[#0f0f0f] pb-20 md:pb-0">
+    <main className="min-h-screen bg-[#0a0a0a] pb-20 md:pb-0 relative">
       {/* ===== LAYER 0: HOME + TIMELINE ===== */}
       <div className={`${getLayerClass(0)} ${showSaved ? 'hidden' : ''}`}>
         {/* Search Bar - Sticky */}
-        <div className={`sticky top-0 z-40 ${hasSearched ? 'glass border-b border-[#2a2a2a]' : ''}`}>
+        <div className={`sticky top-0 z-45 ${hasSearched ? 'glass border-b border-[#2a2a2a]' : ''}`}>
           <div className={`${hasSearched ? 'py-3 px-4' : 'pt-[25vh] px-4'} transition-all duration-500`}>
             {/* Logo / Title */}
             {!hasSearched && (
@@ -259,11 +299,20 @@ export default function Home() {
         {/* Timeline Results */}
         {showTimeline && (
           <div data-timeline-scroll className="min-h-screen">
-            {/* Query heading */}
-            <div className="max-w-[700px] mx-auto px-4 pt-6 pb-2">
+            {/* Query heading with Share option */}
+            <div className="max-w-[700px] mx-auto px-4 pt-6 pb-2 flex items-center justify-between">
               <h2 className="text-xl md:text-2xl font-bold text-white">
                 Timeline for: <span className="gradient-text">{searchedQuery}</span>
               </h2>
+              <button
+                onClick={handleShareTimeline}
+                className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3.5 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
+                </svg>
+                Share
+              </button>
             </div>
 
             {/* Loading */}
@@ -273,7 +322,7 @@ export default function Home() {
             {error && !loading && (
               <div className="max-w-[700px] mx-auto px-4 py-16 text-center">
                 <div className="text-6xl mb-4">🔍</div>
-                <p className="text-gray-400 text-lg">{error}</p>
+                <p className="text-gray-400 text-lg leading-relaxed">{error}</p>
               </div>
             )}
 
@@ -296,7 +345,7 @@ export default function Home() {
           <div className="fixed bottom-32 md:bottom-20 left-0 right-0 text-center text-gray-600 text-sm animate-float" style={{ animationDelay: '500ms' }}>
             <div className="flex items-center justify-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-500/30"></span>
-              <span>Powered by AI</span>
+              <span>Powered by AI & Gemini</span>
               <span className="w-2 h-2 rounded-full bg-purple-500/30"></span>
             </div>
           </div>
@@ -355,6 +404,39 @@ export default function Home() {
           }
         }}
       />
+
+      {/* ===== FLOATING MIC BUTTON (Voice Search) ===== */}
+      <button
+        onClick={() => setShowVoiceSearch(true)}
+        className="fixed bottom-24 right-6 md:bottom-8 md:right-8 z-40 w-14 h-14 rounded-full bg-gradient-to-tr from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/35 hover:scale-105 transition-all duration-200 cursor-pointer group"
+        title="Voice Search"
+      >
+        <span className="absolute inset-0 rounded-full bg-blue-500/20 animate-ping group-hover:hidden" />
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          className="w-6 h-6 relative z-10"
+        >
+          <path d="M8.25 4.5a3.75 3.75 0 1 1 7.5 0v8.25a3.75 3.75 0 1 1-7.5 0V4.5Z" />
+          <path d="M6 10.5a.75.75 0 0 1 .75.75v1.5a5.25 5.25 0 0 0 10.5 0v-1.5a.75.75 0 0 1 1.5 0v1.5a6.75 6.75 0 0 1-6 6.709v2.291h3a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1 0-1.5h3v-2.291a6.75 6.75 0 0 1-6-6.709v-1.5A.75.75 0 0 1 6 10.5Z" />
+        </svg>
+      </button>
+
+      {/* ===== VOICE SEARCH OVERLAY MODAL ===== */}
+      {showVoiceSearch && (
+        <VoiceSearchModal
+          onClose={() => setShowVoiceSearch(false)}
+          onSearch={(voiceQuery) => handleSearch(voiceQuery)}
+        />
+      )}
+
+      {/* ===== GLOBAL TOAST NOTIFICATION ===== */}
+      {toastMessage && (
+        <div className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-50 bg-[#161616] border border-blue-500/30 text-white px-5 py-2.5 rounded-full shadow-xl text-sm font-semibold animate-fadeSlideUp">
+          {toastMessage}
+        </div>
+      )}
     </main>
   );
 }

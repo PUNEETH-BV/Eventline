@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { TimelineEvent } from '@/types';
 
 interface EventDetailPanelProps {
@@ -11,6 +11,9 @@ interface EventDetailPanelProps {
   isBookmarked: boolean;
   onToggleBookmark: (event: TimelineEvent) => void;
 }
+
+// Global client-side cache to survive detail panel unmounting
+const insightsCache: Record<string, string[]> = {};
 
 function StatusBadge({ status }: { status: TimelineEvent['status'] }) {
   if (status === 'past') {
@@ -43,6 +46,9 @@ export default function EventDetailPanel({
   isBookmarked,
   onToggleBookmark,
 }: EventDetailPanelProps) {
+  const [insights, setInsights] = useState<string[]>([]);
+  const [loadingInsights, setLoadingInsights] = useState(false);
+
   const formattedDate = new Date(event.date).toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
@@ -50,11 +56,53 @@ export default function EventDetailPanel({
     year: 'numeric',
   });
 
-  // Helper to generate Google Calendar URL (All-day event)
+  // Fetch AI insights
+  useEffect(() => {
+    if (!event) return;
+
+    // Check local cache first
+    if (insightsCache[event.id]) {
+      setInsights(insightsCache[event.id]);
+      setLoadingInsights(false);
+      return;
+    }
+
+    let active = true;
+    async function fetchInsights() {
+      setLoadingInsights(true);
+      setInsights([]);
+      try {
+        const res = await fetch('/api/insights', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: event.title, date: event.date }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (active && data.insights) {
+            insightsCache[event.id] = data.insights;
+            setInsights(data.insights);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch insights:', err);
+      } finally {
+        if (active) {
+          setLoadingInsights(false);
+        }
+      }
+    }
+
+    fetchInsights();
+
+    return () => {
+      active = false;
+    };
+  }, [event]);
+
+  // Helper to generate Google Calendar URL
   const getGoogleCalendarUrl = (ev: TimelineEvent) => {
     const startDateStr = ev.date.replace(/-/g, '');
-    
-    // End date is start date + 1 day for all-day events
     const startDate = new Date(ev.date);
     const endDate = new Date(startDate);
     endDate.setDate(startDate.getDate() + 1);
@@ -66,7 +114,7 @@ export default function EventDetailPanel({
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDateStr}/${endDateStr}&details=${details}`;
   };
 
-  // Helper to generate and download ICS file (All-day event)
+  // Helper to generate and download ICS file
   const downloadIcsFile = (ev: TimelineEvent) => {
     const startDateStr = ev.date.replace(/-/g, '');
     const startDate = new Date(ev.date);
@@ -160,12 +208,36 @@ export default function EventDetailPanel({
           <p className="text-gray-300 leading-relaxed">{event.description}</p>
         </div>
 
-        {/* AI insights placeholder */}
-        <div className="mt-6 p-4 bg-[#1a1a1a] rounded-xl border border-[#2a2a2a]">
-          <p className="text-gray-500 text-sm italic">
-            AI-generated insights about this event will appear here based on the
-            latest information available.
-          </p>
+        {/* AI insights panel */}
+        <div className="mt-6 p-4 bg-[#161616] rounded-xl border border-[#2a2a2a]">
+          <h4 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-1.5">
+            <span className="text-blue-400">✨</span> AI Insights
+          </h4>
+          
+          {loadingInsights && (
+            <div className="space-y-3 py-2">
+              <div className="h-4 w-full bg-[#2a2a2a] rounded animate-shimmer" />
+              <div className="h-4 w-5/6 bg-[#2a2a2a] rounded animate-shimmer" />
+              <div className="h-4 w-4/5 bg-[#2a2a2a] rounded animate-shimmer" />
+            </div>
+          )}
+
+          {!loadingInsights && insights.length > 0 && (
+            <ul className="space-y-3">
+              {insights.map((insight, idx) => (
+                <li key={idx} className="text-sm text-gray-300 flex items-start gap-2.5 leading-relaxed">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />
+                  <span>{insight}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {!loadingInsights && insights.length === 0 && (
+            <p className="text-gray-500 text-sm italic">
+              No additional insights available for this milestone.
+            </p>
+          )}
         </div>
 
         {/* Bookmark button */}
@@ -229,7 +301,7 @@ export default function EventDetailPanel({
         {/* Dig Deeper button */}
         <button
           onClick={onDigDeeper}
-          className="w-full mt-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-lg py-4 rounded-2xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all duration-200 cursor-pointer"
+          className="w-full mt-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold text-lg py-4 rounded-2xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all duration-200 cursor-pointer"
         >
           Dig Deeper 🔍
         </button>
