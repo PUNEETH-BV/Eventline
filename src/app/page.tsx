@@ -13,6 +13,7 @@ import DigDeeperChat from '@/components/DigDeeperChat';
 import BottomNav from '@/components/BottomNav';
 import SavedEvents from '@/components/SavedEvents';
 import VoiceSearchModal from '@/components/VoiceSearchModal';
+import GeneralChatPanel from '@/components/GeneralChatPanel';
 
 export default function Home() {
   // Search state
@@ -41,6 +42,7 @@ export default function Home() {
 
   // New states for v2: voice search modal & toast notifications
   const [showVoiceSearch, setShowVoiceSearch] = useState(false);
+  const [showGeneralChat, setShowGeneralChat] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
   const triggerToast = useCallback((msg: string) => {
@@ -445,6 +447,34 @@ export default function Home() {
           currentEvents={events}
         />
       )}
+
+      {/* ===== FLOATING GENERAL CHAT BOT BUTTON ===== */}
+      <button
+        onClick={() => setShowGeneralChat(true)}
+        className="fixed bottom-24 left-6 md:bottom-8 md:left-8 z-40 w-14 h-14 rounded-full bg-gradient-to-tr from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/35 hover:scale-105 transition-all duration-200 cursor-pointer group"
+        title="EventLine AI Assistant"
+      >
+        <span className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping group-hover:hidden" />
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          className="w-6 h-6 relative z-10"
+        >
+          <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0 1 12 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 0 1-3.476.383.75.75 0 0 1-.643-.353l-3.854-5.836A.75.75 0 0 0 10.74 15H9.75a.75.75 0 0 0-.75.75v3.475a.75.75 0 0 1-1.28.53l-3.32-3.32c-.087-.087-.191-.157-.307-.206A48.567 48.567 0 0 1 2.25 12V6.741c0-1.946 1.37-3.678 3.348-3.97ZM6.75 8.25a.75.75 0 0 1 .75-.75h9a.75.75 0 0 1 0 1.5h-9a.75.75 0 0 1-.75-.75Zm.75 2.25a.75.75 0 0 0 0 1.5h6a.75.75 0 0 0 0-1.5h-6Z" clipRule="evenodd" />
+        </svg>
+      </button>
+
+      {/* ===== GENERAL CHAT PANEL OVERLAY ===== */}
+      <GeneralChatPanel
+        isOpen={showGeneralChat}
+        onClose={() => setShowGeneralChat(false)}
+        onSuggestionClick={(q) => {
+          setShowGeneralChat(false);
+          setQuery(q);
+          handleSearch(q);
+        }}
+      />
 
       {/* ===== GLOBAL TOAST NOTIFICATION ===== */}
       {toastMessage && (

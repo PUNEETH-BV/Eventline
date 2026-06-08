@@ -138,7 +138,7 @@ export default function VoiceSearchModal({ onClose, onSearch, currentEvents }: V
           // Send setup message with the search_events tool and system instruction
           const setupMsg = {
             setup: {
-              model: 'models/gemini-2.0-flash-live-001',
+              model: 'models/gemini-3.5-flash',
               generationConfig: {
                 responseModalities: ['TEXT'],
               },
