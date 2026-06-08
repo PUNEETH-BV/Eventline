@@ -1,15 +1,6 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenAI } from '@google/genai';
+import { generateContentWithFallback } from '@/lib/gemini';
 import type { ChatMessage } from '@/types';
-
-const apiKey = process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'your-gemini-api-key-here'
-  ? process.env.GEMINI_API_KEY
-  : undefined;
-
-const ai = new GoogleGenAI({
-  apiKey,
-  httpOptions: process.env.GEMINI_BASE_URL ? { baseUrl: process.env.GEMINI_BASE_URL } : undefined,
-});
 
 const MODEL_NAME = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
@@ -37,7 +28,7 @@ export async function POST(request: Request) {
     }));
 
     // Generate content
-    const response = await ai.models.generateContent({
+    const response = await generateContentWithFallback({
       model: MODEL_NAME,
       contents,
       config: {
