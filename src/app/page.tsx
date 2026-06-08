@@ -12,8 +12,9 @@ import EventDetailPanel from '@/components/EventDetailPanel';
 import DigDeeperChat from '@/components/DigDeeperChat';
 import BottomNav from '@/components/BottomNav';
 import SavedEvents from '@/components/SavedEvents';
-import VoiceSearchModal from '@/components/VoiceSearchModal';
 import GeneralChatPanel from '@/components/GeneralChatPanel';
+import AuthModal from '@/components/AuthModal';
+import ProfileDropdown from '@/components/ProfileDropdown';
 
 export default function Home() {
   // Search state
@@ -40,9 +41,10 @@ export default function Home() {
   // Active tab (mobile nav)
   const [activeTab, setActiveTab] = useState<ActiveTab>('home');
 
-  // New states for v2: voice search modal & toast notifications
-  const [showVoiceSearch, setShowVoiceSearch] = useState(false);
+  // New states for v2/v3: auth, chatbot, & toast notifications
   const [showGeneralChat, setShowGeneralChat] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ name: string; email: string; history?: string[] } | null>(null);
   const [toastMessage, setToastMessage] = useState('');
 
   const triggerToast = useCallback((msg: string) => {
@@ -50,6 +52,20 @@ export default function Home() {
     setTimeout(() => {
       setToastMessage('');
     }, 2000);
+  }, []);
+
+  // Restore user session on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedSession = localStorage.getItem('eventline_session');
+      if (savedSession) {
+        try {
+          setCurrentUser(JSON.parse(savedSession));
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
   }, []);
 
   // Search handler
@@ -65,9 +81,36 @@ export default function Home() {
     setEvents([]);
     setActiveTab('search');
 
-    // Update URL query parameters without reloading the page
     if (typeof window !== 'undefined') {
       window.history.pushState({}, '', `?q=${encodeURIComponent(q)}`);
+      
+      // Save search query to logged-in user history
+      const savedSession = localStorage.getItem('eventline_session');
+      if (savedSession) {
+        try {
+          const userObj = JSON.parse(savedSession);
+          const usersListStr = localStorage.getItem('eventline_users') || '[]';
+          const users = JSON.parse(usersListStr);
+          const activeUserIndex = users.findIndex((u: any) => u.email === userObj.email);
+          
+          if (activeUserIndex !== -1) {
+            const history = users[activeUserIndex].history || [];
+            // Remove duplicate if it already exists, so it jumps to top
+            const filteredHistory = history.filter((h: string) => h !== q);
+            filteredHistory.unshift(q);
+            if (filteredHistory.length > 20) filteredHistory.pop(); // limit to 20
+            
+            users[activeUserIndex].history = filteredHistory;
+            localStorage.setItem('eventline_users', JSON.stringify(users));
+            
+            const updatedUser = { ...userObj, history: filteredHistory };
+            localStorage.setItem('eventline_session', JSON.stringify(updatedUser));
+            setCurrentUser(updatedUser);
+          }
+        } catch (err) {
+          console.error('Failed to save search history:', err);
+        }
+      }
     }
 
     try {
@@ -102,7 +145,6 @@ export default function Home() {
       const q = params.get('q');
       if (q) {
         setQuery(q);
-        // We delay slightly to ensure component is fully mounted
         setTimeout(() => {
           handleSearch(q);
         }, 100);
@@ -253,19 +295,7 @@ export default function Home() {
       .catch(() => triggerToast('Failed to copy link.'));
   }, [searchedQuery, triggerToast]);
 
-  // Handle updates when voice search results are returned
-  const handleVoiceSearchResult = useCallback((voiceQuery: string, voiceEvents: TimelineEvent[]) => {
-    setQuery(voiceQuery);
-    setSearchedQuery(voiceQuery);
-    setEvents(voiceEvents);
-    setError('');
-    setHasSearched(true);
-    setActiveTab('search');
 
-    if (typeof window !== 'undefined') {
-      window.history.pushState({}, '', `?q=${encodeURIComponent(voiceQuery)}`);
-    }
-  }, []);
 
   // Layer CSS classes
   const getLayerClass = (layer: number) => {
@@ -421,32 +451,36 @@ export default function Home() {
         }}
       />
 
-      {/* ===== FLOATING MIC BUTTON (Voice Search) ===== */}
-      <button
-        onClick={() => setShowVoiceSearch(true)}
-        className="fixed bottom-24 right-6 md:bottom-8 md:right-8 z-40 w-14 h-14 rounded-full bg-gradient-to-tr from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white flex items-center justify-center shadow-lg shadow-blue-500/35 hover:scale-105 transition-all duration-200 cursor-pointer group"
-        title="Voice Search"
-      >
-        <span className="absolute inset-0 rounded-full bg-blue-500/20 animate-ping group-hover:hidden" />
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          className="w-6 h-6 relative z-10"
-        >
-          <path d="M8.25 4.5a3.75 3.75 0 1 1 7.5 0v8.25a3.75 3.75 0 1 1-7.5 0V4.5Z" />
-          <path d="M6 10.5a.75.75 0 0 1 .75.75v1.5a5.25 5.25 0 0 0 10.5 0v-1.5a.75.75 0 0 1 1.5 0v1.5a6.75 6.75 0 0 1-6 6.709v2.291h3a.75.75 0 0 1 0 1.5h-7.5a.75.75 0 0 1 0-1.5h3v-2.291a6.75 6.75 0 0 1-6-6.709v-1.5A.75.75 0 0 1 6 10.5Z" />
-        </svg>
-      </button>
-
-      {/* ===== VOICE SEARCH OVERLAY MODAL ===== */}
-      {showVoiceSearch && (
-        <VoiceSearchModal
-          onClose={() => setShowVoiceSearch(false)}
-          onSearch={handleVoiceSearchResult}
-          currentEvents={events}
-        />
-      )}
+      {/* ===== AUTH / USER PROFILE CONTROLS ===== */}
+      <div className="absolute top-4 right-4 z-40">
+        {currentUser ? (
+          <ProfileDropdown 
+            user={currentUser} 
+            onLogout={() => {
+              localStorage.removeItem('eventline_session');
+              setCurrentUser(null);
+              triggerToast('Signed out successfully');
+            }} 
+            onHistoryClick={(historyQuery) => {
+              setQuery(historyQuery);
+              handleSearch(historyQuery);
+            }}
+            onHistoryUpdate={(updatedHistory) => {
+              setCurrentUser(prev => prev ? { ...prev, history: updatedHistory } : null);
+            }}
+          />
+        ) : (
+          <button
+            onClick={() => setShowAuthModal(true)}
+            className="bg-[#111]/80 hover:bg-[#161616] text-gray-300 hover:text-white border border-[#2a2a2a] rounded-xl px-4 py-2 text-xs font-bold tracking-tight transition-all duration-200 cursor-pointer shadow-lg shadow-black/20 flex items-center gap-1.5 backdrop-blur-md animate-fadeIn"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+            </svg>
+            Sign In
+          </button>
+        )}
+      </div>
 
       {/* ===== FLOATING GENERAL CHAT BOT BUTTON ===== */}
       <button
@@ -474,6 +508,16 @@ export default function Home() {
           setQuery(q);
           handleSearch(q);
         }}
+      />
+
+      {/* ===== AUTH MODAL ===== */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+        triggerToast={triggerToast}
       />
 
       {/* ===== GLOBAL TOAST NOTIFICATION ===== */}
