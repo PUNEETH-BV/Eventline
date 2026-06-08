@@ -1,0 +1,294 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* ===== CSS CUSTOM PROPERTIES ===== */
+:root {
+  --bg-primary: #0f0f0f;
+  --bg-card: #1a1a1a;
+  --bg-card-hover: #252525;
+  --border-subtle: #2a2a2a;
+  --border-hover: #3a3a3a;
+  --accent-blue: #3b82f6;
+  --accent-purple: #8b5cf6;
+  --text-primary: #ffffff;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --transition-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== BASE STYLES ===== */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== SCROLLBAR STYLES ===== */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
+}
+
+/* ===== ANIMATIONS ===== */
+
+/* Fade + Slide Up for timeline cards */
+@keyframes fadeSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeSlideUp {
+  animation: fadeSlideUp 0.5s ease-out forwards;
+  opacity: 0;
+}
+
+/* Pulsing glow for highlighted event */
+@keyframes glowPulse {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.3), 0 0 30px rgba(59, 130, 246, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(59, 130, 246, 0.5), 0 0 50px rgba(59, 130, 246, 0.2);
+  }
+}
+
+.animate-glowPulse {
+  animation: glowPulse 2s ease-in-out infinite;
+}
+
+/* Pulsing dot for TODAY status */
+@keyframes pulseDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.5);
+  }
+}
+
+.animate-pulseDot {
+  animation: pulseDot 1.5s ease-in-out infinite;
+}
+
+/* Typing indicator dots */
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-6px);
+  }
+}
+
+.typing-dot {
+  animation: bounce 1.2s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* Spinner */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Subtle float for search page */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* ===== LAYER TRANSITIONS ===== */
+.layer-base {
+  transition: transform 300ms var(--transition-smooth),
+              filter 300ms var(--transition-smooth),
+              opacity 300ms var(--transition-smooth);
+  will-change: transform, filter, opacity;
+}
+
+.layer-active {
+  transform: scale(1);
+  filter: blur(0px);
+  opacity: 1;
+}
+
+.layer-behind-1 {
+  transform: scale(0.95);
+  filter: blur(6px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.layer-behind-2 {
+  transform: scale(0.90);
+  filter: blur(12px);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+/* ===== PANEL TRANSITIONS ===== */
+.panel-slide {
+  transition: transform 300ms var(--transition-smooth);
+  will-change: transform;
+}
+
+/* Mobile: slide up */
+.panel-enter-mobile {
+  transform: translateY(100%);
+}
+
+.panel-active-mobile {
+  transform: translateY(0);
+}
+
+/* Desktop: slide right */
+@media (min-width: 768px) {
+  .panel-enter-desktop {
+    transform: translateX(100%);
+  }
+
+  .panel-active-desktop {
+    transform: translateX(0);
+  }
+}
+
+/* ===== TIMELINE STYLES ===== */
+.timeline-line {
+  position: absolute;
+  width: 2px;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(
+    to bottom,
+    #374151 0%,
+    rgba(59, 130, 246, 0.5) 40%,
+    rgba(139, 92, 246, 0.5) 100%
+  );
+}
+
+.timeline-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.timeline-dot-past {
+  border-color: #4b5563;
+  background-color: #374151;
+}
+
+.timeline-dot-present {
+  border-color: #34d399;
+  background-color: #34d399;
+  box-shadow: 0 0 12px rgba(52, 211, 153, 0.5);
+}
+
+.timeline-dot-future {
+  border-color: #3b82f6;
+  background-color: #3b82f6;
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+}
+
+/* ===== UTILITY ===== */
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Safe area insets for iOS */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 8px);
+}
+
+/* Backdrop overlay */
+.backdrop-dark {
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Search glow effect */
+.search-glow {
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3),
+              0 0 20px rgba(59, 130, 246, 0.1);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(26, 26, 26, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
