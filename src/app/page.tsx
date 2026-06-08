@@ -295,6 +295,50 @@ export default function Home() {
       .catch(() => triggerToast('Failed to copy link.'));
   }, [searchedQuery, triggerToast]);
 
+  // Go back to Home / search new topic
+  const handleGoHome = useCallback(() => {
+    setHasSearched(false);
+    setEvents([]);
+    setSearchedQuery('');
+    setQuery('');
+    setError('');
+    setActiveTab('home');
+    if (typeof window !== 'undefined') {
+      window.history.pushState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  // Update user history in states & localStorage
+  const updateUserHistory = useCallback((newHistory: string[]) => {
+    if (!currentUser) return;
+    
+    // Update active session
+    const savedSession = localStorage.getItem('eventline_session');
+    if (savedSession) {
+      try {
+        const sessionObj = JSON.parse(savedSession);
+        localStorage.setItem('eventline_session', JSON.stringify({ ...sessionObj, history: newHistory }));
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Update in users database
+    const usersListStr = localStorage.getItem('eventline_users') || '[]';
+    try {
+      const users = JSON.parse(usersListStr);
+      const userIndex = users.findIndex((u: any) => u.email === currentUser.email);
+      if (userIndex !== -1) {
+        users[userIndex].history = newHistory;
+        localStorage.setItem('eventline_users', JSON.stringify(users));
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
+    setCurrentUser(prev => prev ? { ...prev, history: newHistory } : null);
+  }, [currentUser]);
+
 
 
   // Layer CSS classes
@@ -339,26 +383,84 @@ export default function Home() {
                 <ExampleChips onChipClick={handleChipClick} />
               </div>
             )}
+
+            {/* Recent Searches / History in the home page */}
+            {!hasSearched && currentUser && currentUser.history && currentUser.history.length > 0 && (
+              <div className="mt-8 max-w-2xl mx-auto px-4 animate-fadeSlideUp text-center" style={{ animationDelay: '300ms' }}>
+                <div className="flex items-center justify-between max-w-md mx-auto mb-3">
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                    </svg>
+                    Recent Searches
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      updateUserHistory([]);
+                    }}
+                    className="text-[10px] font-bold text-red-400 hover:text-red-300 cursor-pointer transition-colors"
+                  >
+                    Clear All
+                  </button>
+                </div>
+                <div className="flex flex-wrap justify-center gap-2.5 max-w-lg mx-auto">
+                  {currentUser.history.slice(0, 6).map((queryText, index) => (
+                    <div
+                      key={index}
+                      onClick={() => handleChipClick(queryText)}
+                      className="text-xs text-gray-300 bg-[#121212]/80 hover:bg-[#181818] border border-[#222] hover:border-blue-500/30 rounded-xl px-3.5 py-2 transition-all cursor-pointer flex items-center gap-1.5 group hover:scale-105"
+                    >
+                      <span className="truncate max-w-[150px] font-medium">{queryText}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const updated = (currentUser.history || []).filter((_, idx) => idx !== index);
+                          updateUserHistory(updated);
+                        }}
+                        className="text-gray-500 hover:text-red-400 p-0.5 rounded transition-all opacity-60 hover:opacity-100 cursor-pointer"
+                        title="Delete search"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3 h-3">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Timeline Results */}
         {showTimeline && (
           <div data-timeline-scroll className="min-h-screen">
-            {/* Query heading with Share option */}
+            {/* Query heading with Home & Share option */}
             <div className="max-w-[700px] mx-auto px-4 pt-6 pb-2 flex items-center justify-between">
-              <h2 className="text-xl md:text-2xl font-bold text-white">
+              <h2 className="text-xl md:text-2xl font-bold text-white truncate max-w-[55%]">
                 Timeline for: <span className="gradient-text">{searchedQuery}</span>
               </h2>
-              <button
-                onClick={handleShareTimeline}
-                className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3.5 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
-                </svg>
-                Share
-              </button>
+              <div className="flex gap-2 shrink-0">
+                <button
+                  onClick={handleGoHome}
+                  className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-emerald-400">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                  </svg>
+                  Home
+                </button>
+                <button
+                  onClick={handleShareTimeline}
+                  className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
+                  </svg>
+                  Share
+                </button>
+              </div>
             </div>
 
             {/* Loading */}
@@ -368,7 +470,16 @@ export default function Home() {
             {error && !loading && (
               <div className="max-w-[700px] mx-auto px-4 py-16 text-center">
                 <div className="text-6xl mb-4">🔍</div>
-                <p className="text-gray-400 text-lg leading-relaxed">{error}</p>
+                <p className="text-gray-400 text-lg leading-relaxed mb-6">{error}</p>
+                <button
+                  onClick={handleGoHome}
+                  className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-4 py-2 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer mx-auto"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-emerald-400">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                  </svg>
+                  Go Home
+                </button>
               </div>
             )}
 
