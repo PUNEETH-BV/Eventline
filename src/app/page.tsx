@@ -58,18 +58,19 @@ export default function Home() {
         body: JSON.stringify({ query: q }),
       });
 
+      const data = await res.json().catch(() => ({}));
+
       if (!res.ok) {
-        throw new Error('Search failed');
+        throw new Error(data.error || 'Search failed');
       }
 
-      const data = await res.json();
       if (data.events && data.events.length > 0) {
         setEvents(data.events);
       } else {
         setError('No events found. Try a different search query.');
       }
-    } catch {
-      setError('Something went wrong. Please try again.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -168,22 +169,26 @@ export default function Home() {
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setChatHistories(prev => ({
-          ...prev,
-          [eventId]: [
-            ...messages,
-            { role: 'assistant', content: data.message },
-          ],
-        }));
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Chat request failed');
       }
-    } catch {
+
       setChatHistories(prev => ({
         ...prev,
         [eventId]: [
           ...messages,
-          { role: 'assistant', content: 'Sorry, I encountered an error. Please try again.' },
+          { role: 'assistant', content: data.message },
+        ],
+      }));
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Sorry, I encountered an error. Please try again.';
+      setChatHistories(prev => ({
+        ...prev,
+        [eventId]: [
+          ...messages,
+          { role: 'assistant', content: `Error: ${errMsg}` },
         ],
       }));
     } finally {
