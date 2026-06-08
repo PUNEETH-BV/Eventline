@@ -57,8 +57,7 @@ export default function GeneralChatPanel({ isOpen, onClose, onSuggestionClick }:
 
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Something went wrong.';
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errMsg}` }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Please try again after some time.' }]);
     } finally {
       setLoading(false);
     }

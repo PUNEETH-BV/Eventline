@@ -38,7 +38,6 @@ Be friendly, highly concise, and practical.`,
     return NextResponse.json({ reply });
   } catch (error) {
     console.error('General Chat API error:', error);
-    const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Something went wrong. Please try again after some time.' }, { status: 500 });
   }
 }

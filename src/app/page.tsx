@@ -132,7 +132,7 @@ export default function Home() {
         setError('No events found. Try a different search query.');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setError('Something went wrong. Please try again after some time.');
     } finally {
       setLoading(false);
     }
@@ -257,12 +257,11 @@ export default function Home() {
         ],
       }));
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Sorry, I encountered an error. Please try again.';
       setChatHistories(prev => ({
         ...prev,
         [eventId]: [
           ...messages,
-          { role: 'assistant', content: `Error: ${errMsg}` },
+          { role: 'assistant', content: 'Something went wrong. Please try again after some time.' },
         ],
       }));
     } finally {

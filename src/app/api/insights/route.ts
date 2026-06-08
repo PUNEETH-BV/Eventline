@@ -29,7 +29,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ insights });
   } catch (error) {
     console.error('Insights API error:', error);
-    const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Something went wrong. Please try again after some time.' }, { status: 500 });
   }
 }
