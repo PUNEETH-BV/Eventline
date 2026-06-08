@@ -32,7 +32,6 @@ export async function POST(request: Request) {
       config: {
         systemInstruction: `You are an event research assistant. When given a search query, use Google Search grounding to find ALL related important dates, deadlines, and milestones. Return ONLY a valid JSON array sorted by date (earliest first). Each object must have: title (string), date (ISO format YYYY-MM-DD), description (max 20 words), status (past/present/future relative to today's date which is ${todayDate}), category (one of: exam/deadline/result/announcement/event). Return ONLY the JSON array, no other text.`,
         tools: [{ googleSearch: {} }],
-        responseMimeType: 'application/json',
       },
     });
 

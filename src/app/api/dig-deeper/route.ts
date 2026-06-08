@@ -39,7 +39,6 @@ export async function POST(request: Request) {
       config: {
         systemInstruction: `You are an event research assistant. The user has already found these events: ${titlesListText}. Find MORE related events, dates, deadlines, and milestones for the query that are NOT already in the list. Use Google Search grounding to discover them. Return ONLY a valid JSON array sorted by date. Each object must have: title, date (ISO YYYY-MM-DD), description (max 20 words), status (past/present/future relative to today's date which is ${todayDate}), category (exam/deadline/result/announcement/event). Return ONLY the JSON array.`,
         tools: [{ googleSearch: {} }],
-        responseMimeType: 'application/json',
       },
     });
 
