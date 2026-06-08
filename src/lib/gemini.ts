@@ -10,15 +10,38 @@ export interface GenerateContentParams {
  * Gets all configured Gemini API keys from environment variables.
  */
 export function getGeminiApiKeys(): string[] {
-  const keysStr = process.env.GEMINI_API_KEYS;
+  const cleanKey = (k: string) => k.replace(/['"\s]/g, '').trim();
+  const isValidGeminiKey = (k: string) => k.startsWith('AIzaSy');
+  
   let keys: string[] = [];
+
+  // Parse GEMINI_API_KEYS (plural)
+  const keysStr = process.env.GEMINI_API_KEYS;
   if (keysStr) {
-    keys = keysStr.split(',').map(k => k.trim()).filter(Boolean);
+    const parts = keysStr.split(',').map(cleanKey).filter(isValidGeminiKey);
+    for (const p of parts) {
+      if (!keys.includes(p)) {
+        keys.push(p);
+      }
+    }
   }
   
+  // Parse GEMINI_API_KEY (singular)
   const singleKey = process.env.GEMINI_API_KEY;
-  if (singleKey && singleKey !== 'your-gemini-api-key-here' && !keys.includes(singleKey)) {
-    keys.push(singleKey);
+  if (singleKey) {
+    if (singleKey.includes(',')) {
+      const parts = singleKey.split(',').map(cleanKey).filter(isValidGeminiKey);
+      for (const p of parts) {
+        if (!keys.includes(p)) {
+          keys.push(p);
+        }
+      }
+    } else {
+      const cleaned = cleanKey(singleKey);
+      if (isValidGeminiKey(cleaned) && !keys.includes(cleaned)) {
+        keys.push(cleaned);
+      }
+    }
   }
   
   return keys;
