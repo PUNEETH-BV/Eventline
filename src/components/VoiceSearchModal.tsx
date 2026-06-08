@@ -26,6 +26,7 @@ export default function VoiceSearchModal({ onClose, onSearch, currentEvents }: V
   const streamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const isModelRespondingRef = useRef<boolean>(false);
 
   // Auto-scroll to bottom of conversation transcript
   useEffect(() => {
@@ -55,7 +56,8 @@ export default function VoiceSearchModal({ onClose, onSearch, currentEvents }: V
         setStatus('connecting');
         const configRes = await fetch('/api/voice-config');
         if (!configRes.ok) {
-          throw new Error('Failed to load server voice configuration.');
+          const errData = await configRes.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to load server voice configuration.');
         }
         const { apiKey } = await configRes.json();
 
@@ -137,12 +139,37 @@ ${currentResultsContext}`,
             
             // 1. Check for standard text response from the model
             if (data.serverContent?.modelTurn?.parts) {
+              let chunkText = '';
               for (const part of data.serverContent.modelTurn.parts) {
                 if (part.text) {
-                  const text = part.text.trim();
-                  setTranscript(prev => [...prev, { role: 'assistant', text }]);
+                  chunkText += part.text;
                 }
               }
+
+              if (chunkText) {
+                setTranscript(prev => {
+                  if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && isModelRespondingRef.current) {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = {
+                      ...updated[updated.length - 1],
+                      text: updated[updated.length - 1].text + chunkText,
+                    };
+                    return updated;
+                  } else {
+                    isModelRespondingRef.current = true;
+                    return [...prev, { role: 'assistant', text: chunkText }];
+                  }
+                });
+              }
+            }
+
+            if (data.serverContent?.modelTurn?.turnComplete) {
+              isModelRespondingRef.current = false;
+            }
+
+            if (data.serverContent?.interrupted) {
+              isModelRespondingRef.current = false;
+              setTranscript(prev => [...prev, { role: 'system', text: 'Interrupted' }]);
             }
 
             // 2. Check for toolCall from the model
@@ -182,6 +209,8 @@ ${currentResultsContext}`,
                           toolResponse: {
                             functionResponses: [
                               {
+                                name: 'search_events',
+                                id: call.id,
                                 response: {
                                   output: {
                                     events: eventsFound.map((e: any) => ({
@@ -193,7 +222,6 @@ ${currentResultsContext}`,
                                     })),
                                   },
                                 },
-                                id: call.id,
                               },
                             ],
                           },
@@ -213,10 +241,11 @@ ${currentResultsContext}`,
                         toolResponse: {
                           functionResponses: [
                             {
+                              name: 'search_events',
+                              id: call.id,
                               response: {
                                 output: { error: 'Failed to search for events.' },
                               },
-                              id: call.id,
                             },
                           ],
                         },
@@ -320,6 +349,7 @@ ${currentResultsContext}`,
 
   // Cleanup helper
   const cleanup = () => {
+    isModelRespondingRef.current = false;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
