@@ -50,6 +50,59 @@ export default function EventDetailPanel({
     year: 'numeric',
   });
 
+  // Helper to generate Google Calendar URL (All-day event)
+  const getGoogleCalendarUrl = (ev: TimelineEvent) => {
+    const startDateStr = ev.date.replace(/-/g, '');
+    
+    // End date is start date + 1 day for all-day events
+    const startDate = new Date(ev.date);
+    const endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + 1);
+    const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+
+    const title = encodeURIComponent(ev.title);
+    const details = encodeURIComponent(ev.description);
+    
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDateStr}/${endDateStr}&details=${details}`;
+  };
+
+  // Helper to generate and download ICS file (All-day event)
+  const downloadIcsFile = (ev: TimelineEvent) => {
+    const startDateStr = ev.date.replace(/-/g, '');
+    const startDate = new Date(ev.date);
+    const endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + 1);
+    const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+
+    const nowStr = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+    const uid = `eventline-${ev.id}@eventline.app`;
+
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//EventLine//Calendar Event//EN',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${nowStr}`,
+      `DTSTART;VALUE=DATE:${startDateStr}`,
+      `DTEND;VALUE=DATE:${endDateStr}`,
+      `SUMMARY:${ev.title}`,
+      `DESCRIPTION:${ev.description.replace(/\n/g, '\\n')}`,
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].join('\r\n');
+
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `${ev.title.replace(/[^a-z0-9]/gi, '_')}.ics`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div
       className={`
@@ -69,7 +122,7 @@ export default function EventDetailPanel({
         {/* Back button */}
         <button
           onClick={onBack}
-          className="text-gray-400 hover:text-white transition-colors mb-4 flex items-center gap-2"
+          className="text-gray-400 hover:text-white transition-colors mb-4 flex items-center gap-2 cursor-pointer"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -119,7 +172,7 @@ export default function EventDetailPanel({
         <button
           onClick={() => onToggleBookmark(event)}
           className={`
-            w-full mt-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2
+            w-full mt-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer
             ${
               isBookmarked
                 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
@@ -143,10 +196,40 @@ export default function EventDetailPanel({
           {isBookmarked ? 'Bookmarked' : 'Bookmark this event'}
         </button>
 
+        {/* Add to Device Calendar */}
+        <div className="mt-6 border-t border-[#2a2a2a] pt-6">
+          <h3 className="text-sm font-semibold text-gray-400 mb-3">Add to Device Calendar</h3>
+          <div className="grid grid-cols-2 gap-3">
+            {/* Google Calendar Link */}
+            <a
+              href={getGoogleCalendarUrl(event)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 rounded-xl py-2.5 px-3 flex items-center justify-center gap-2 hover:border-emerald-500/30 hover:text-white transition-all duration-200 text-sm font-medium"
+            >
+              <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.905 0-5.64-.5-8.157-1.418M18.683 7.582A11.954 11.954 0 0012 9c-2.612 0-5.087-.53-7.317-1.482" />
+              </svg>
+              Google Calendar
+            </a>
+
+            {/* Download ICS Button */}
+            <button
+              onClick={() => downloadIcsFile(event)}
+              className="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 rounded-xl py-2.5 px-3 flex items-center justify-center gap-2 hover:border-blue-500/30 hover:text-white transition-all duration-200 text-sm font-medium cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" />
+              </svg>
+              iCal / Outlook (.ics)
+            </button>
+          </div>
+        </div>
+
         {/* Dig Deeper button */}
         <button
           onClick={onDigDeeper}
-          className="w-full mt-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-lg py-4 rounded-2xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all duration-200 cursor-pointer"
+          className="w-full mt-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-lg py-4 rounded-2xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all duration-200 cursor-pointer"
         >
           Dig Deeper 🔍
         </button>
