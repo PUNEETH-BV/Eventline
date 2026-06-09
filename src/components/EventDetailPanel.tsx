@@ -10,29 +10,34 @@ interface EventDetailPanelProps {
   onDigDeeper: () => void;
   isBookmarked: boolean;
   onToggleBookmark: (event: TimelineEvent) => void;
+  onAddPersonalMilestone?: (milestone: { title: string; date: string; description: string }) => void;
 }
 
-// Global client-side cache to survive detail panel unmounting
-const insightsCache: Record<string, string[]> = {};
-
-function StatusBadge({ status }: { status: TimelineEvent['status'] }) {
-  if (status === 'past') {
+function StatusBadge({ event }: { event: TimelineEvent }) {
+  if (event.isPersonal) {
+    return (
+      <span className="bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs px-2.5 py-1 rounded-full uppercase tracking-wide inline-flex items-center gap-1 font-semibold">
+        Personal
+      </span>
+    );
+  }
+  if (event.status === 'past') {
     return (
       <span className="bg-gray-700/50 text-gray-400 text-xs px-2.5 py-1 rounded-full uppercase tracking-wide">
         Past
       </span>
     );
   }
-  if (status === 'present') {
+  if (event.status === 'present') {
     return (
-      <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2.5 py-1 rounded-full uppercase tracking-wide inline-flex items-center gap-1.5">
+      <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2.5 py-1 rounded-full uppercase tracking-wide inline-flex items-center gap-1.5 font-semibold">
         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
         Today
       </span>
     );
   }
   return (
-    <span className="bg-blue-500/20 text-blue-400 text-xs px-2.5 py-1 rounded-full uppercase tracking-wide">
+    <span className="bg-blue-500/20 text-blue-400 text-xs px-2.5 py-1 rounded-full uppercase tracking-wide font-medium">
       Upcoming
     </span>
   );
@@ -45,9 +50,21 @@ export default function EventDetailPanel({
   onDigDeeper,
   isBookmarked,
   onToggleBookmark,
+  onAddPersonalMilestone,
 }: EventDetailPanelProps) {
-  const [insights, setInsights] = useState<string[]>([]);
-  const [loadingInsights, setLoadingInsights] = useState(false);
+  const [baseDescription, setBaseDescription] = useState('');
+  const [loadingDescription, setLoadingDescription] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  // Personal Milestone form state
+  const [showMilestoneForm, setShowMilestoneForm] = useState(false);
+  const [milestoneGoal, setMilestoneGoal] = useState('');
+  const [milestoneDate, setMilestoneDate] = useState('');
+
+  // Reminder options states
+  const [showReminderOptions, setShowReminderOptions] = useState(false);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
+  const [reminderToast, setReminderToast] = useState('');
 
   const formattedDate = new Date(event.date).toLocaleDateString('en-US', {
     weekday: 'long',
@@ -56,99 +73,118 @@ export default function EventDetailPanel({
     year: 'numeric',
   });
 
-  // Fetch AI insights
+  // Fetch AI base description fresh when card is clicked
   useEffect(() => {
-    if (!event) return;
-
-    // Check local cache first
-    if (insightsCache[event.id]) {
-      setInsights(insightsCache[event.id]);
-      setLoadingInsights(false);
-      return;
-    }
+    if (!event || !isActive) return;
 
     let active = true;
-    async function fetchInsights() {
-      setLoadingInsights(true);
-      setInsights([]);
+    async function fetchBaseDescription() {
+      setLoadingDescription(true);
+      setBaseDescription('');
       try {
-        const res = await fetch('/api/insights', {
+        const res = await fetch('/api/description', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: event.title, date: event.date }),
+          body: JSON.stringify({
+            title: event.title,
+            date: event.date,
+            description: event.description,
+          }),
         });
         if (res.ok) {
           const data = await res.json();
-          if (active && data.insights) {
-            insightsCache[event.id] = data.insights;
-            setInsights(data.insights);
+          if (active && data.description) {
+            setBaseDescription(data.description);
           }
+        } else {
+          setBaseDescription(event.description);
         }
       } catch (err) {
-        console.error('Failed to fetch insights:', err);
+        console.error('Failed to fetch description:', err);
+        setBaseDescription(event.description);
       } finally {
         if (active) {
-          setLoadingInsights(false);
+          setLoadingDescription(false);
         }
       }
     }
 
-    fetchInsights();
+    fetchBaseDescription();
+
+    // Reset forms
+    setShowMilestoneForm(false);
+    setMilestoneGoal('');
+    setMilestoneDate(event.date);
 
     return () => {
       active = false;
     };
-  }, [event]);
+  }, [event, isActive]);
 
-  // Helper to generate Google Calendar URL
-  const getGoogleCalendarUrl = (ev: TimelineEvent) => {
-    const startDateStr = ev.date.replace(/-/g, '');
-    const startDate = new Date(ev.date);
+  // Google Calendar URL generator
+  const getGoogleCalendarUrl = () => {
+    const startDateStr = event.date.replace(/-/g, '');
+    const startDate = new Date(event.date);
     const endDate = new Date(startDate);
     endDate.setDate(startDate.getDate() + 1);
     const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
 
-    const title = encodeURIComponent(ev.title);
-    const details = encodeURIComponent(ev.description);
+    const title = encodeURIComponent(event.title);
+    const details = encodeURIComponent(event.description);
     
     return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${startDateStr}/${endDateStr}&details=${details}`;
   };
 
-  // Helper to generate and download ICS file
-  const downloadIcsFile = (ev: TimelineEvent) => {
-    const startDateStr = ev.date.replace(/-/g, '');
-    const startDate = new Date(ev.date);
-    const endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + 1);
-    const endDateStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+  const handleReminderSelect = async (daysBefore: number) => {
+    setShowReminderOptions(false);
+    if (typeof window === 'undefined') return;
 
-    const nowStr = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    const uid = `eventline-${ev.id}@eventline.app`;
+    if (!('Notification' in window)) {
+      setShowCalendarModal(true);
+      return;
+    }
 
-    const icsContent = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//EventLine//Calendar Event//EN',
-      'BEGIN:VEVENT',
-      `UID:${uid}`,
-      `DTSTAMP:${nowStr}`,
-      `DTSTART;VALUE=DATE:${startDateStr}`,
-      `DTEND;VALUE=DATE:${endDateStr}`,
-      `SUMMARY:${ev.title}`,
-      `DESCRIPTION:${ev.description.replace(/\n/g, '\\n')}`,
-      'END:VEVENT',
-      'END:VCALENDAR'
-    ].join('\r\n');
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        const msg = `Reminder scheduled ${daysBefore} day${daysBefore > 1 ? 's' : ''} before ${event.title}!`;
+        
+        // Save reminder in local storage
+        const reminders = JSON.parse(localStorage.getItem('eventline_reminders') || '[]');
+        reminders.push({
+          id: `${event.id}-${Date.now()}`,
+          title: event.title,
+          date: event.date,
+          daysBefore,
+        });
+        localStorage.setItem('eventline_reminders', JSON.stringify(reminders));
 
-    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `${ev.title.replace(/[^a-z0-9]/gi, '_')}.ics`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+        setReminderToast(msg);
+        setTimeout(() => setReminderToast(''), 3000);
+      } else {
+        setShowCalendarModal(true);
+      }
+    } catch {
+      setShowCalendarModal(true);
+    }
+  };
+
+  const handleMilestoneSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!milestoneGoal.trim() || !milestoneDate) return;
+
+    if (onAddPersonalMilestone) {
+      onAddPersonalMilestone({
+        title: milestoneGoal.trim(),
+        date: milestoneDate,
+        description: `Goal set near: ${event.title}`,
+      });
+      setMilestoneGoal('');
+      setShowMilestoneForm(false);
+      
+      setReminderToast('Personal milestone added to timeline!');
+      setTimeout(() => setReminderToast(''), 3000);
+    }
   };
 
   return (
@@ -156,8 +192,8 @@ export default function EventDetailPanel({
       className={`
         fixed z-50
         inset-x-0 bottom-0 h-[90vh] rounded-t-3xl border-t
-        md:inset-y-0 md:right-0 md:left-auto md:w-full md:max-w-lg md:h-auto md:rounded-t-none md:border-t-0 md:border-l
-        bg-[#111] border-[#2a2a2a]
+        md:inset-y-0 md:right-0 md:left-auto md:w-full md:max-w-[60vw] md:h-auto md:rounded-t-none md:border-t-0 md:border-l
+        bg-[#111] border-[#2a2a2a] shadow-2xl
         transition-transform duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
         ${
           isActive
@@ -166,89 +202,184 @@ export default function EventDetailPanel({
         }
       `}
     >
-      <div className="overflow-y-auto h-full p-6">
-        {/* Back button */}
-        <button
-          onClick={onBack}
-          className="text-gray-400 hover:text-white transition-colors mb-4 flex items-center gap-2 cursor-pointer"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            stroke="currentColor"
-            className="w-5 h-5"
+      <div className="overflow-y-auto h-full p-6 relative">
+        {/* Top bar */}
+        <div className="flex justify-between items-center mb-6">
+          <button
+            onClick={onBack}
+            className="text-gray-400 hover:text-white transition-colors flex items-center gap-2 cursor-pointer font-semibold text-sm"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
-            />
-          </svg>
-          <span className="text-sm">Back</span>
-        </button>
-
-        {/* Status badge */}
-        <StatusBadge status={event.status} />
-
-        {/* Title */}
-        <h2 className="text-2xl font-bold text-white mt-4">{event.title}</h2>
-
-        {/* Date */}
-        <p className="text-gray-400 mt-2">{formattedDate}</p>
-
-        {/* Category badge */}
-        <span className="inline-block bg-[#252525] text-gray-400 text-xs px-3 py-1 rounded-full uppercase mt-3">
-          {event.category}
-        </span>
-
-        {/* Description */}
-        <div className="mt-6">
-          <p className="text-gray-300 leading-relaxed">{event.description}</p>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+            </svg>
+            Back
+          </button>
+          <span className="text-gray-400 text-xs font-bold uppercase tracking-wider max-w-[50%] truncate">
+            {event.title}
+          </span>
+          <button
+            onClick={() => {
+              if (navigator.share) {
+                navigator.share({
+                  title: event.title,
+                  text: event.description,
+                  url: window.location.href,
+                }).catch(() => {});
+              } else {
+                navigator.clipboard.writeText(window.location.href);
+                setReminderToast('Link copied to clipboard!');
+                setTimeout(() => setReminderToast(''), 2000);
+              }
+            }}
+            className="text-gray-400 hover:text-white transition-all cursor-pointer"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
+            </svg>
+          </button>
         </div>
 
-        {/* AI insights panel */}
-        <div className="mt-6 p-4 bg-[#161616] rounded-xl border border-[#2a2a2a]">
-          <h4 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-1.5">
-            <span className="text-blue-400">✨</span> AI Insights
-          </h4>
-          
-          {loadingInsights && (
-            <div className="space-y-3 py-2">
-              <div className="h-4 w-full bg-[#2a2a2a] rounded animate-shimmer" />
-              <div className="h-4 w-5/6 bg-[#2a2a2a] rounded animate-shimmer" />
-              <div className="h-4 w-4/5 bg-[#2a2a2a] rounded animate-shimmer" />
+        {/* Status + Date */}
+        <div className="mb-4">
+          <StatusBadge event={event} />
+          <h2 className="text-2xl font-bold text-white mt-3 leading-tight">{event.title}</h2>
+          <p className="text-gray-400 text-sm mt-1">{formattedDate}</p>
+        </div>
+
+        <div className="h-[1px] bg-[#222] my-4" />
+
+        {/* AI-Generated Base Description */}
+        <div className="mb-6">
+          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-1">
+            <span className="text-blue-500">✨</span> AI Overview
+          </h3>
+
+          {loadingDescription ? (
+            <div className="space-y-3 animate-pulse">
+              <div className="h-4 bg-[#202020] rounded w-full" />
+              <div className="h-4 bg-[#202020] rounded w-5/6" />
+              <div className="h-4 bg-[#202020] rounded w-4/5" />
+              <div className="h-4 bg-[#202020] rounded w-2/3" />
             </div>
-          )}
-
-          {!loadingInsights && insights.length > 0 && (
-            <ul className="space-y-3">
-              {insights.map((insight, idx) => (
-                <li key={idx} className="text-sm text-gray-300 flex items-start gap-2.5 leading-relaxed">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />
-                  <span>{insight}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {!loadingInsights && insights.length === 0 && (
-            <p className="text-gray-500 text-sm italic">
-              No additional insights available for this milestone.
+          ) : (
+            <p className="text-gray-300 leading-relaxed text-sm bg-[#161616]/50 p-4 rounded-2xl border border-[#222]">
+              {baseDescription}
             </p>
           )}
         </div>
 
-        {/* Bookmark button */}
+        {/* Credibility section with Tooltip */}
+        {!event.isPersonal && event.source && (
+          <div className="mb-6 flex items-center justify-between text-xs bg-[#161616] border border-[#2a2a2a] p-3.5 rounded-2xl relative">
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500 font-medium">📌 Source:</span>
+              <span className="text-white font-semibold">{event.source}</span>
+            </div>
+            <div className="flex items-center gap-1.5 relative">
+              <span className="text-gray-500 font-medium">Confidence:</span>
+              <span className={`font-bold uppercase tracking-wider ${
+                event.confidence === 'high' ? 'text-emerald-400' : 'text-amber-400'
+              }`}>{event.confidence || 'medium'}</span>
+              
+              <button
+                type="button"
+                onMouseEnter={() => setShowTooltip(true)}
+                onMouseLeave={() => setShowTooltip(false)}
+                onClick={() => setShowTooltip(!showTooltip)}
+                className="w-4.5 h-4.5 rounded-full bg-[#2a2a2a] text-gray-400 flex items-center justify-center text-[10px] font-bold cursor-help hover:text-white transition-all"
+              >
+                ?
+              </button>
+
+              {showTooltip && (
+                <div className="absolute right-0 bottom-7 bg-[#252525] border border-[#3a3a3a] text-gray-300 text-[10px] p-2.5 rounded-xl shadow-2xl w-48 z-40 leading-relaxed animate-fadeIn">
+                  Confidence rating represents the reliability of the source links and alignment across multiple event platforms.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Set Reminder Button */}
+        {!event.isPersonal && (
+          <div className="mb-4 relative">
+            <button
+              onClick={() => setShowReminderOptions(!showReminderOptions)}
+              className="w-full bg-[#181818] hover:bg-[#202020] text-gray-300 hover:text-white border border-[#2a2a2a] hover:border-blue-500/30 font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all duration-200 text-xs"
+            >
+              🔔 Remind Me
+            </button>
+            {showReminderOptions && (
+              <div className="absolute top-12 left-0 right-0 bg-[#161616] border border-[#2a2a2a] rounded-xl shadow-2xl z-40 overflow-hidden animate-fadeIn">
+                {[
+                  { label: '1 Day Before', val: 1 },
+                  { label: '3 Days Before', val: 3 },
+                  { label: '1 Week Before', val: 7 },
+                ].map(opt => (
+                  <button
+                    key={opt.val}
+                    onClick={() => handleReminderSelect(opt.val)}
+                    className="w-full py-3 px-4 text-xs font-semibold text-gray-400 hover:text-white text-left hover:bg-[#202020] border-b border-[#222] last:border-0 cursor-pointer"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Add Personal Milestone Button */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowMilestoneForm(!showMilestoneForm)}
+            className="w-full bg-[#181818] hover:bg-[#202020] text-amber-500 border border-[#2a2a2a] hover:border-amber-500/30 font-semibold py-3.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all duration-200 text-xs"
+          >
+            ➕ Add My Own Milestone Near This Date
+          </button>
+          
+          {showMilestoneForm && (
+            <form onSubmit={handleMilestoneSubmit} className="mt-3 bg-[#161616] border border-[#2a2a2a] p-4 rounded-xl space-y-3 animate-fadeIn">
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">What's your goal?</label>
+                <input
+                  type="text"
+                  required
+                  value={milestoneGoal}
+                  onChange={(e) => setMilestoneGoal(e.target.value)}
+                  placeholder="e.g. Finish syllabus review, Register, etc."
+                  className="w-full bg-[#121212] border border-[#222] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">Date</label>
+                <input
+                  type="date"
+                  required
+                  value={milestoneDate}
+                  onChange={(e) => setMilestoneDate(e.target.value)}
+                  className="w-full bg-[#121212] border border-[#222] rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs py-3 rounded-xl cursor-pointer transition-all"
+              >
+                Save Milestone
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* Bookmarks Toggle button */}
         <button
           onClick={() => onToggleBookmark(event)}
           className={`
-            w-full mt-6 py-3 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer
+            w-full mb-4 py-3 rounded-xl font-semibold transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer text-xs border
             ${
               isBookmarked
-                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-                : 'bg-[#1a1a1a] text-gray-300 border border-[#2a2a2a] hover:border-blue-500/30'
+                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                : 'bg-[#1a1a1a] text-gray-300 border-[#2a2a2a] hover:border-blue-500/30'
             }
           `}
         >
@@ -257,7 +388,7 @@ export default function EventDetailPanel({
             viewBox="0 0 24 24"
             strokeWidth={1.5}
             stroke="currentColor"
-            className={`w-5 h-5 ${isBookmarked ? 'fill-blue-500' : 'fill-none'}`}
+            className={`w-4 h-4 ${isBookmarked ? 'fill-blue-500' : 'fill-none'}`}
           >
             <path
               strokeLinecap="round"
@@ -268,44 +399,48 @@ export default function EventDetailPanel({
           {isBookmarked ? 'Bookmarked' : 'Bookmark this event'}
         </button>
 
-        {/* Add to Device Calendar */}
-        <div className="mt-6 border-t border-[#2a2a2a] pt-6">
-          <h3 className="text-sm font-semibold text-gray-400 mb-3">Add to Device Calendar</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {/* Google Calendar Link */}
-            <a
-              href={getGoogleCalendarUrl(event)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 rounded-xl py-2.5 px-3 flex items-center justify-center gap-2 hover:border-emerald-500/30 hover:text-white transition-all duration-200 text-sm font-medium"
-            >
-              <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.905 0-5.64-.5-8.157-1.418M18.683 7.582A11.954 11.954 0 0012 9c-2.612 0-5.087-.53-7.317-1.482" />
-              </svg>
-              Google Calendar
-            </a>
-
-            {/* Download ICS Button */}
-            <button
-              onClick={() => downloadIcsFile(event)}
-              className="bg-[#1a1a1a] border border-[#2a2a2a] text-gray-300 rounded-xl py-2.5 px-3 flex items-center justify-center gap-2 hover:border-blue-500/30 hover:text-white transition-all duration-200 text-sm font-medium cursor-pointer"
-            >
-              <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" />
-              </svg>
-              iCal / Outlook (.ics)
-            </button>
-          </div>
-        </div>
-
-        {/* Dig Deeper button */}
+        {/* Big Glowing CTA Button */}
         <button
           onClick={onDigDeeper}
-          className="w-full mt-6 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-semibold text-lg py-4 rounded-2xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all duration-200 cursor-pointer"
+          className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-bold text-lg py-4 rounded-2xl shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all duration-200 cursor-pointer"
         >
           Dig Deeper 🔍
         </button>
       </div>
+
+      {/* Reminder Fallback Modal (Calendar link) */}
+      {showCalendarModal && (
+        <div className="fixed inset-0 z-60 bg-black/85 flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-[#121212] border border-[#2a2a2a] rounded-3xl p-6 max-w-sm w-full text-center relative shadow-2xl">
+            <h3 className="text-lg font-bold text-white mb-2">🔔 Set Calendar Reminder</h3>
+            <p className="text-gray-400 text-xs leading-relaxed mb-6">
+              Push notifications are blocked or unsupported on this device. Click below to add this date directly to your Google Calendar.
+            </p>
+            <a
+              href={getGoogleCalendarUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setShowCalendarModal(false)}
+              className="block w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3.5 rounded-xl text-center text-xs transition-all mb-3"
+            >
+              Add to Google Calendar
+            </a>
+            <button
+              onClick={() => setShowCalendarModal(false)}
+              className="w-full bg-[#202020] hover:bg-[#252525] text-gray-300 font-semibold py-3 rounded-xl text-xs cursor-pointer transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {reminderToast && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-60 bg-blue-600 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-2xl animate-fadeSlideUp">
+          {reminderToast}
+        </div>
+      )}
     </div>
   );
 }

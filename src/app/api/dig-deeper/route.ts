@@ -28,7 +28,18 @@ export async function POST(request: Request) {
       model: MODEL_NAME,
       contents: query,
       config: {
-        systemInstruction: `You are an event research assistant. The user has already found these events: ${titlesListText}. Find MORE related events, dates, deadlines, and milestones for the query that are NOT already in the list. Use Google Search grounding to discover them. Return ONLY a valid JSON array sorted by date. Each object must have: title, date (ISO YYYY-MM-DD), description (max 20 words), status (past/present/future relative to today's date which is ${todayDate}), category (exam/deadline/result/announcement/event). Return ONLY the JSON array.`,
+        systemInstruction: `You are an event research assistant with web search access. The user has already found these events: ${titlesListText}. Find MORE related events, dates, deadlines, and milestones for the query that are NOT already in the list. Use Google Search grounding to discover them. Return ONLY a valid JSON array sorted by date (earliest first). Do not include any markdown formatting or code fences.
+Each object in the array must have exactly these fields:
+{
+  id: unique string,
+  title: string (max 8 words),
+  date: ISO date string (YYYY-MM-DD),
+  description: string (max 25 words),
+  status: 'past' | 'present' | 'future' (relative to today's date which is ${todayDate}),
+  category: 'exam' | 'deadline' | 'result' | 'announcement' | 'sports' | 'tech' | 'general',
+  source: string (website name or 'AI Generated'),
+  confidence: 'high' | 'medium' | 'low'
+}`,
         tools: [{ googleSearch: {} }],
       },
     });
@@ -45,15 +56,17 @@ export async function POST(request: Request) {
 
     // Assign unique IDs and ensure correct typing
     const events: TimelineEvent[] = parsed.map(
-      (item: Omit<TimelineEvent, 'id'>, index: number) => ({
-        id: crypto.randomUUID?.() ?? `${query}-${index}`,
+      (item: any, index: number) => ({
+        id: item.id || crypto.randomUUID?.() || `${query}-${index}`,
         title: item.title,
         date: item.date,
         description: item.description,
         status: item.status,
         category: item.category,
         bookmarked: false,
-        sourceUrl: item.sourceUrl,
+        sourceUrl: item.sourceUrl || undefined,
+        source: item.source || 'AI Generated',
+        confidence: item.confidence || 'medium',
       })
     );
 

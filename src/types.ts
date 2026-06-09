@@ -4,9 +4,17 @@ export interface TimelineEvent {
   date: string;
   description: string;
   status: 'past' | 'present' | 'future';
-  category: 'exam' | 'deadline' | 'result' | 'announcement' | 'event';
+  category: 'exam' | 'deadline' | 'result' | 'announcement' | 'sports' | 'tech' | 'general';
   bookmarked?: boolean;
   sourceUrl?: string;
+  source?: string;
+  confidence?: 'high' | 'medium' | 'low';
+  isPersonal?: boolean;
+}
+
+export interface UserProfile {
+  type: 'student' | 'professional' | 'curious' | '';
+  interests: ('exams' | 'tech' | 'sports' | 'politics')[];
 }
 
 export type ActiveLayer = 0 | 1 | 2;

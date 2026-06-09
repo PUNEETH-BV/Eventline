@@ -29,6 +29,7 @@ export default function DigDeeperChat({
     year: 'numeric',
   });
 
+  // Auto scroll to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory, isTyping]);
@@ -66,15 +67,15 @@ export default function DigDeeperChat({
       <div className="flex-none p-4 border-b border-[#2a2a2a]">
         <button
           onClick={onBack}
-          className="text-gray-400 hover:text-white transition-colors mb-2 flex items-center gap-2"
+          className="text-gray-400 hover:text-white transition-colors mb-2 flex items-center gap-1.5 cursor-pointer text-xs font-semibold"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
-            strokeWidth={2}
+            strokeWidth={2.5}
             stroke="currentColor"
-            className="w-5 h-5"
+            className="w-4 h-4"
           >
             <path
               strokeLinecap="round"
@@ -82,28 +83,38 @@ export default function DigDeeperChat({
               d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"
             />
           </svg>
-          <span className="text-sm">Back</span>
+          Back
         </button>
-        <p className="text-sm text-gray-400">
-          Exploring: <span className="text-white">{event.title}</span>
-        </p>
-        <p className="text-xs text-gray-500 mt-0.5">{formattedDate}</p>
+        <div className="flex flex-col">
+          <p className="text-sm text-gray-400 font-semibold truncate">
+            Exploring: <span className="text-white">{event.title}</span>
+          </p>
+          <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mt-0.5">
+            🗓️ {formattedDate} • AI-Powered Deep Dive
+          </p>
+        </div>
       </div>
 
-      {/* Chat area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {chatHistory.map((msg, index) => (
+      {/* Chat messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-none">
+        {chatHistory.filter(msg => !msg.content.includes("Tell me everything important about")).map((msg, index) => (
           <div
             key={index}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex items-end ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
+            {/* AI Avatar */}
+            {msg.role === 'assistant' && (
+              <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 text-white flex items-center justify-center text-[8px] font-extrabold mr-2 shrink-0 shadow shadow-purple-500/20">
+                AI
+              </div>
+            )}
             <div
               className={`
-                max-w-[80%] px-4 py-3 text-sm whitespace-pre-wrap
+                max-w-[75%] px-4 py-3 text-xs leading-relaxed
                 ${
                   msg.role === 'user'
-                    ? 'bg-blue-600 text-white rounded-2xl rounded-br-md'
-                    : 'bg-[#1a1a1a] text-gray-200 rounded-2xl rounded-bl-md'
+                    ? 'bg-blue-600 text-white rounded-2xl rounded-br-none shadow shadow-blue-500/10'
+                    : 'bg-[#1a1a1a] text-gray-200 rounded-2xl rounded-bl-none border border-[#222]'
                 }
               `}
             >
@@ -114,11 +125,14 @@ export default function DigDeeperChat({
 
         {/* Typing indicator */}
         {isTyping && (
-          <div className="flex justify-start">
-            <div className="bg-[#1a1a1a] text-gray-200 rounded-2xl rounded-bl-md px-4 py-3 max-w-[80%] flex items-center gap-1.5">
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
+          <div className="flex items-end justify-start">
+            <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 text-white flex items-center justify-center text-[8px] font-extrabold mr-2 shrink-0 shadow shadow-purple-500/20">
+              AI
+            </div>
+            <div className="bg-[#1a1a1a] border border-[#222] text-gray-400 rounded-2xl rounded-bl-none px-4 py-3 max-w-[75%] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 bg-gray-500 rounded-full animate-bounce [animation-delay:300ms]" />
             </div>
           </div>
         )}
@@ -126,22 +140,34 @@ export default function DigDeeperChat({
         <div ref={chatEndRef} />
       </div>
 
+      {/* Suggestion Chip right above input */}
+      <div className="px-4 py-2 border-t border-[#1f1f1f] bg-[#070707] flex justify-start">
+        <button
+          type="button"
+          disabled={isTyping}
+          onClick={() => onSendMessage("💡 What should I do right now?")}
+          className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 text-[10px] font-bold py-1.5 px-3.5 rounded-full cursor-pointer flex items-center gap-1 transition-all disabled:opacity-50"
+        >
+          💡 What should I do right now?
+        </button>
+      </div>
+
       {/* Input area */}
-      <div className="flex-none p-4 border-t border-[#2a2a2a]">
+      <div className="flex-none p-3 bg-[#070707]">
         <div className="flex items-center gap-2">
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about this event..."
+            placeholder="Ask anything..."
             disabled={isTyping}
-            className="flex-1 bg-[#1a1a1a] text-white rounded-full px-5 py-3 border border-[#2a2a2a] focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 outline-none placeholder-gray-500 disabled:opacity-50 transition-all"
+            className="flex-1 bg-[#1a1a1a] text-xs text-white rounded-xl px-4 py-3 border border-[#222] focus:border-blue-500/50 outline-none placeholder-gray-500 disabled:opacity-50 transition-all"
           />
           <button
             onClick={handleSend}
             disabled={isTyping || !input.trim()}
-            className="bg-blue-600 hover:bg-blue-500 rounded-full p-3 text-white transition-colors disabled:opacity-50 disabled:hover:bg-blue-600 cursor-pointer"
+            className="bg-blue-600 hover:bg-blue-500 rounded-xl p-2.5 text-white transition-colors disabled:opacity-50 cursor-pointer"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -149,7 +175,7 @@ export default function DigDeeperChat({
               viewBox="0 0 24 24"
               strokeWidth={2}
               stroke="currentColor"
-              className="w-5 h-5"
+              className="w-4 h-4"
             >
               <path
                 strokeLinecap="round"

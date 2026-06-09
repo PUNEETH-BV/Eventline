@@ -21,7 +21,18 @@ export async function POST(request: Request) {
       model: MODEL_NAME,
       contents: query,
       config: {
-        systemInstruction: `You are an event research assistant. When given a search query, use Google Search grounding to find ALL related important dates, deadlines, and milestones. Return ONLY a valid JSON array sorted by date (earliest first). Each object must have: title (string), date (ISO format YYYY-MM-DD), description (max 20 words), status (past/present/future relative to today's date which is ${todayDate}), category (one of: exam/deadline/result/announcement/event). Return ONLY the JSON array, no other text.`,
+        systemInstruction: `You are an event research assistant with web search access. When given a search query, find ALL related important dates, deadlines, milestones, and events. Use web search to get accurate current information. Return ONLY a valid JSON array sorted by date (earliest first). Do not include any markdown formatting or code fences.
+Each object in the array must have exactly these fields:
+{
+  id: unique string,
+  title: string (max 8 words),
+  date: ISO date string (YYYY-MM-DD),
+  description: string (max 25 words),
+  status: 'past' | 'present' | 'future' (relative to today's date which is ${todayDate}),
+  category: 'exam' | 'deadline' | 'result' | 'announcement' | 'sports' | 'tech' | 'general',
+  source: string (website name or 'AI Generated'),
+  confidence: 'high' | 'medium' | 'low'
+}`,
         tools: [{ googleSearch: {} }],
       },
     });
@@ -38,15 +49,17 @@ export async function POST(request: Request) {
 
     // Assign unique IDs and ensure correct typing
     const events: TimelineEvent[] = parsed.map(
-      (item: Omit<TimelineEvent, 'id'>, index: number) => ({
-        id: crypto.randomUUID?.() ?? `${query}-${index}`,
+      (item: any, index: number) => ({
+        id: item.id || crypto.randomUUID?.() || `${query}-${index}`,
         title: item.title,
         date: item.date,
         description: item.description,
         status: item.status,
         category: item.category,
         bookmarked: false,
-        sourceUrl: item.sourceUrl,
+        sourceUrl: item.sourceUrl || undefined,
+        source: item.source || 'AI Generated',
+        confidence: item.confidence || 'medium',
       })
     );
 

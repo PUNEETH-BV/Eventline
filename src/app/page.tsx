@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { TimelineEvent, ChatMessage, ActiveTab } from '@/types';
+import { TimelineEvent, ChatMessage, ActiveTab, UserProfile } from '@/types';
 import { useBookmarks } from '@/hooks/useBookmarks';
 import { useLayerNavigation } from '@/hooks/useLayerNavigation';
 import SearchBar from '@/components/SearchBar';
@@ -15,6 +15,9 @@ import SavedEvents from '@/components/SavedEvents';
 import GeneralChatPanel from '@/components/GeneralChatPanel';
 import AuthModal from '@/components/AuthModal';
 import ProfileDropdown from '@/components/ProfileDropdown';
+import OnboardingSheet from '@/components/OnboardingSheet';
+import CompareView from '@/components/CompareView';
+import { getCachedQuery, setCachedQuery, getCachedQueriesList } from '@/lib/OfflineCache';
 
 export default function Home() {
   // Search state
@@ -47,6 +50,14 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<{ name: string; email: string; history?: string[] } | null>(null);
   const [toastMessage, setToastMessage] = useState('');
 
+  // Phase 2 states: onboarding, offline state, cached queries list, age banner
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [cacheAgeBanner, setCacheAgeBanner] = useState('');
+  const [cachedQueries, setCachedQueries] = useState<string[]>([]);
+
   const triggerToast = useCallback((msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
@@ -54,7 +65,52 @@ export default function Home() {
     }, 2000);
   }, []);
 
-  // Restore user session on mount
+  // Onboarding sorting helper functions
+  const getEventRelevanceScore = useCallback((event: TimelineEvent, profile: UserProfile) => {
+    let score = 0;
+    
+    if (profile.type === 'student') {
+      if (event.category === 'exam' || event.category === 'deadline' || event.category === 'result') {
+        score += 3;
+      }
+    } else if (profile.type === 'professional') {
+      if (event.category === 'tech' || event.category === 'announcement' || event.category === 'deadline') {
+        score += 2;
+      }
+    }
+
+    profile.interests.forEach(interest => {
+      if (interest === 'exams' && (event.category === 'exam' || event.category === 'deadline' || event.category === 'result')) {
+        score += 5;
+      }
+      if (interest === 'tech' && event.category === 'tech') {
+        score += 5;
+      }
+      if (interest === 'sports' && event.category === 'sports') {
+        score += 5;
+      }
+      if (interest === 'politics' && event.category === 'general') {
+        score += 4;
+      }
+    });
+
+    return score;
+  }, []);
+
+  const sortEventsByProfile = useCallback((eventsList: TimelineEvent[], profile: UserProfile | null) => {
+    if (!profile) return eventsList;
+    
+    return [...eventsList].sort((a, b) => {
+      const scoreA = getEventRelevanceScore(a, profile);
+      const scoreB = getEventRelevanceScore(b, profile);
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA; // highest score first
+      }
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
+  }, [getEventRelevanceScore]);
+
+  // Restore user session and onboarding profile on mount, set up offline listeners
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedSession = localStorage.getItem('eventline_session');
@@ -65,6 +121,31 @@ export default function Home() {
           console.error(err);
         }
       }
+
+      // Check onboarding
+      const savedProfile = localStorage.getItem('eventline_onboarding');
+      if (savedProfile) {
+        try {
+          setUserProfile(JSON.parse(savedProfile));
+        } catch {}
+      } else {
+        setShowOnboarding(true);
+      }
+
+      // Offline detection
+      setIsOffline(!navigator.onLine);
+      const handleOnline = () => setIsOffline(false);
+      const handleOffline = () => setIsOffline(true);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+
+      // Cached queries list
+      setCachedQueries(getCachedQueriesList());
+
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+      };
     }
   }, []);
 
@@ -113,6 +194,24 @@ export default function Home() {
       }
     }
 
+    // Offline mode support
+    if (typeof window !== 'undefined' && !navigator.onLine) {
+      const cached = getCachedQuery(q);
+      if (cached) {
+        const sorted = sortEventsByProfile(cached.events, userProfile);
+        setEvents(sorted);
+        const ageDays = Math.max(0, Math.round((Date.now() - cached.timestamp) / (1000 * 60 * 60 * 24)));
+        setCacheAgeBanner(`Showing cached results from ${ageDays} days ago`);
+        triggerToast(`Loaded offline cache from ${ageDays} days ago`);
+      } else {
+        setError('You are offline and no cached results exist for this search.');
+      }
+      setLoading(false);
+      return;
+    }
+
+    setCacheAgeBanner('');
+
     try {
       const res = await fetch('/api/search', {
         method: 'POST',
@@ -127,7 +226,10 @@ export default function Home() {
       }
 
       if (data.events && data.events.length > 0) {
-        setEvents(data.events);
+        const sorted = sortEventsByProfile(data.events, userProfile);
+        setEvents(sorted);
+        setCachedQuery(q, data.events);
+        setCachedQueries(getCachedQueriesList());
       } else {
         setError('No events found. Try a different search query.');
       }
@@ -136,7 +238,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [query, userProfile, sortEventsByProfile, triggerToast]);
 
   // Read URL search query on mount
   useEffect(() => {
@@ -178,10 +280,9 @@ export default function Home() {
         if (data.events && data.events.length > 0) {
           setEvents(prev => {
             const all = [...prev, ...data.events];
-            all.sort((a: TimelineEvent, b: TimelineEvent) =>
-              new Date(a.date).getTime() - new Date(b.date).getTime()
-            );
-            return all;
+            const sorted = sortEventsByProfile(all, userProfile);
+            setCachedQuery(searchedQuery, sorted);
+            return sorted;
           });
         }
       }
@@ -190,7 +291,7 @@ export default function Home() {
     } finally {
       setDiggingDeeper(false);
     }
-  }, [searchedQuery, events, diggingDeeper]);
+  }, [searchedQuery, events, diggingDeeper, userProfile, sortEventsByProfile]);
 
   // Event card click → open detail
   const handleEventClick = useCallback((event: TimelineEvent) => {
@@ -283,16 +384,35 @@ export default function Home() {
     sendChatMessage(eventId, message, existing);
   }, [selectedEvent, chatHistories, sendChatMessage]);
 
-  // Share timeline link
+  // Share timeline link & download PNG image
   const handleShareTimeline = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (typeof window === 'undefined') return;
 
     const shareUrl = `${window.location.origin}/?q=${encodeURIComponent(searchedQuery)}`;
     navigator.clipboard.writeText(shareUrl)
-      .then(() => triggerToast('Link copied!'))
-      .catch(() => triggerToast('Failed to copy link.'));
-  }, [searchedQuery, triggerToast]);
+      .then(() => triggerToast('Link copied & PNG generating!'))
+      .catch(() => triggerToast('PNG generating!'));
+
+    try {
+      import('@/lib/ShareImageHelper').then(({ shareTimelineAsImage }) => {
+        shareTimelineAsImage(searchedQuery, events);
+      });
+    } catch (err) {
+      console.error('Failed to generate PNG:', err);
+    }
+  }, [searchedQuery, events, triggerToast]);
+
+  const handleShareWrapped = useCallback(() => {
+    try {
+      import('@/lib/ShareImageHelper').then(({ shareSavedTimelineAsImage }) => {
+        shareSavedTimelineAsImage(bookmarks);
+      });
+      triggerToast('Wrapped PNG is generating!');
+    } catch (err) {
+      console.error('Failed to generate Wrapped PNG:', err);
+    }
+  }, [bookmarks, triggerToast]);
 
   // Go back to Home / search new topic
   const handleGoHome = useCallback(() => {
@@ -354,157 +474,218 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#0a0a0a] pb-20 md:pb-0 relative">
+      {/* ===== COMPARE MODE TOGGLE (Top-left) ===== */}
+      {!showSaved && !compareMode && (
+        <div className="absolute top-4 left-4 z-40">
+          <button
+            onClick={() => setCompareMode(true)}
+            className="bg-[#111]/80 hover:bg-[#161616] text-gray-300 hover:text-white border border-[#2a2a2a] hover:border-blue-500/35 rounded-xl px-4 py-2.5 text-xs font-bold tracking-tight transition-all duration-200 cursor-pointer shadow-lg shadow-black/20 flex items-center gap-1.5 backdrop-blur-md animate-fadeIn"
+          >
+            <span>⚡ Compare Timelines</span>
+          </button>
+        </div>
+      )}
+
       {/* ===== LAYER 0: HOME + TIMELINE ===== */}
       <div className={`${getLayerClass(0)} ${showSaved ? 'hidden' : ''}`}>
-        {/* Search Bar - Sticky */}
-        <div className={`sticky top-0 z-45 ${hasSearched ? 'glass border-b border-[#2a2a2a]' : ''}`}>
-          <div className={`${hasSearched ? 'py-3 px-4' : 'pt-[25vh] px-4'} transition-all duration-500`}>
-            {/* Logo / Title */}
-            {!hasSearched && (
-              <div className="text-center mb-8 animate-fadeSlideUp">
-                <h1 className="text-5xl md:text-6xl font-bold mb-3">
-                  <span className="gradient-text">EventLine</span>
-                </h1>
-                <p className="text-gray-400 text-lg">Search any event. See the full timeline.</p>
-              </div>
-            )}
+        {compareMode ? (
+          <CompareView
+            onBack={() => setCompareMode(false)}
+            onEventClick={handleEventClick}
+            isBookmarked={isBookmarked}
+            onToggleBookmark={toggleBookmark}
+            userProfile={userProfile}
+          />
+        ) : (
+          <>
+            {/* Search Bar - Sticky */}
+            <div className={`sticky top-0 z-45 ${hasSearched ? 'glass border-b border-[#2a2a2a]' : ''}`}>
+              <div className={`${hasSearched ? 'py-3 px-4' : 'pt-[25vh] px-4'} transition-all duration-500`}>
+                {/* Logo / Title */}
+                {!hasSearched && (
+                  <div className="text-center mb-8 animate-fadeSlideUp">
+                    <h1 className="text-5xl md:text-6xl font-bold mb-3">
+                      <span className="gradient-text">EventLine</span>
+                    </h1>
+                    <p className="text-gray-400 text-lg">Search any event. See the full timeline.</p>
+                  </div>
+                )}
 
-            <SearchBar
-              query={query}
-              setQuery={setQuery}
-              onSearch={() => handleSearch()}
-              loading={loading}
-            />
+                <SearchBar
+                  query={query}
+                  setQuery={setQuery}
+                  onSearch={() => handleSearch()}
+                  loading={loading}
+                />
 
-            {/* Example Chips */}
-            {!hasSearched && (
-              <div className="mt-6 animate-fadeSlideUp" style={{ animationDelay: '200ms' }}>
-                <ExampleChips onChipClick={handleChipClick} />
-              </div>
-            )}
+                {/* Example Chips */}
+                {!hasSearched && (
+                  <div className="mt-6 animate-fadeSlideUp" style={{ animationDelay: '200ms' }}>
+                    <ExampleChips onChipClick={handleChipClick} />
+                  </div>
+                )}
 
-            {/* Recent Searches / History in the home page */}
-            {!hasSearched && currentUser && currentUser.history && currentUser.history.length > 0 && (
-              <div className="mt-8 max-w-2xl mx-auto px-4 animate-fadeSlideUp text-center" style={{ animationDelay: '300ms' }}>
-                <div className="flex items-center justify-between max-w-md mx-auto mb-3">
-                  <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-                    </svg>
-                    Recent Searches
-                  </span>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      updateUserHistory([]);
-                    }}
-                    className="text-[10px] font-bold text-red-400 hover:text-red-300 cursor-pointer transition-colors"
-                  >
-                    Clear All
-                  </button>
-                </div>
-                <div className="flex flex-wrap justify-center gap-2.5 max-w-lg mx-auto">
-                  {currentUser.history.slice(0, 6).map((queryText, index) => (
-                    <div
-                      key={index}
-                      onClick={() => handleChipClick(queryText)}
-                      className="text-xs text-gray-300 bg-[#121212]/80 hover:bg-[#181818] border border-[#222] hover:border-blue-500/30 rounded-xl px-3.5 py-2 transition-all cursor-pointer flex items-center gap-1.5 group hover:scale-105"
-                    >
-                      <span className="truncate max-w-[150px] font-medium">{queryText}</span>
+                {/* Recent Searches / History in the home page */}
+                {!hasSearched && currentUser && currentUser.history && currentUser.history.length > 0 && (
+                  <div className="mt-8 max-w-2xl mx-auto px-4 animate-fadeSlideUp text-center" style={{ animationDelay: '300ms' }}>
+                    <div className="flex items-center justify-between max-w-md mx-auto mb-3">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                        </svg>
+                        Recent Searches
+                      </span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          const updated = (currentUser.history || []).filter((_, idx) => idx !== index);
-                          updateUserHistory(updated);
+                          updateUserHistory([]);
                         }}
-                        className="text-gray-500 hover:text-red-400 p-0.5 rounded transition-all opacity-60 hover:opacity-100 cursor-pointer"
-                        title="Delete search"
+                        className="text-[10px] font-bold text-red-400 hover:text-red-300 cursor-pointer transition-colors"
                       >
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3 h-3">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                        </svg>
+                        Clear All
                       </button>
                     </div>
-                  ))}
+                    <div className="flex flex-wrap justify-center gap-2.5 max-w-lg mx-auto">
+                      {currentUser.history.slice(0, 6).map((queryText, index) => (
+                        <div
+                          key={index}
+                          onClick={() => handleChipClick(queryText)}
+                          className="text-xs text-gray-300 bg-[#121212]/80 hover:bg-[#181818] border border-[#222] hover:border-blue-500/30 rounded-xl px-3.5 py-2 transition-all cursor-pointer flex items-center gap-1.5 group hover:scale-105"
+                        >
+                          <span className="truncate max-w-[150px] font-medium">{queryText}</span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const updated = (currentUser.history || []).filter((_, idx) => idx !== index);
+                              updateUserHistory(updated);
+                            }}
+                            className="text-gray-500 hover:text-red-400 p-0.5 rounded transition-all opacity-60 hover:opacity-100 cursor-pointer"
+                            title="Delete search"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3 h-3">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Offline-Ready Cached Search List (Show when offline or in addition) */}
+                {!hasSearched && cachedQueries.length > 0 && (
+                  <div className="mt-8 max-w-2xl mx-auto px-4 animate-fadeSlideUp text-center" style={{ animationDelay: '350ms' }}>
+                    <div className="flex items-center justify-between max-w-md mx-auto mb-3 border-b border-[#222] pb-1.5">
+                      <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-3.5 h-3.5 text-blue-500">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 3.75H6.912a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 0 1 2.008 1.24l.885 1.77a2.25 2.25 0 0 0 2.007 1.24h1.98a2.25 2.25 0 0 0 2.007-1.24l.885-1.77a2.25 2.25 0 0 1 2.007-1.24h3.86m-18 0h18" />
+                        </svg>
+                        Offline-Ready Timelines
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2 max-w-lg mx-auto">
+                      {cachedQueries.map((queryText, index) => (
+                        <button
+                          key={index}
+                          onClick={() => handleChipClick(queryText)}
+                          className="text-xs text-gray-300 bg-[#161616] hover:bg-[#202020] border border-[#2a2a2a] hover:border-blue-500/30 rounded-xl px-4 py-2 transition-all cursor-pointer hover:scale-105"
+                        >
+                          {queryText}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Timeline Results */}
+            {showTimeline && (
+              <div data-timeline-scroll className="min-h-screen">
+                {/* Query heading with Home & Share option */}
+                <div className="max-w-[700px] mx-auto px-4 pt-6 pb-2 flex items-center justify-between">
+                  <h2 className="text-xl md:text-2xl font-bold text-white truncate max-w-[55%]">
+                    Timeline for: <span className="gradient-text">{searchedQuery}</span>
+                  </h2>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={handleGoHome}
+                      className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-emerald-400">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                      </svg>
+                      Home
+                    </button>
+                    <button
+                      onClick={handleShareTimeline}
+                      className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
+                      </svg>
+                      Share
+                    </button>
+                  </div>
+                </div>
+
+                {/* Offline Cache Age Banner */}
+                {cacheAgeBanner && (
+                  <div className="max-w-[700px] mx-auto px-4 mt-4 mb-2 animate-fadeSlideUp">
+                    <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs px-4 py-2.5 rounded-xl text-center flex items-center justify-center gap-2 font-medium">
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-4 h-4 text-amber-500">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span>{cacheAgeBanner}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading */}
+                {loading && <SkeletonTimeline />}
+
+                {/* Error */}
+                {error && !loading && (
+                  <div className="max-w-[700px] mx-auto px-4 py-16 text-center">
+                    <div className="text-6xl mb-4">🔍</div>
+                    <p className="text-gray-400 text-lg leading-relaxed mb-6">{error}</p>
+                    <button
+                      onClick={handleGoHome}
+                      className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-4 py-2 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer mx-auto"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-emerald-400">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                      </svg>
+                      Go Home
+                    </button>
+                  </div>
+                )}
+
+                {/* Timeline */}
+                {!loading && !error && events.length > 0 && (
+                  <Timeline
+                    events={events}
+                    onEventClick={handleEventClick}
+                    onDigDeeper={handleDigDeeperTimeline}
+                    diggingDeeper={diggingDeeper}
+                    isBookmarked={isBookmarked}
+                    onToggleBookmark={toggleBookmark}
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Home empty state decoration */}
+            {showHome && (
+              <div className="fixed bottom-32 md:bottom-20 left-0 right-0 text-center text-gray-600 text-sm animate-float" style={{ animationDelay: '500ms' }}>
+                <div className="flex items-center justify-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500/30"></span>
+                  <span>Powered by AI & Gemini</span>
+                  <span className="w-2 h-2 rounded-full bg-purple-500/30"></span>
                 </div>
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Timeline Results */}
-        {showTimeline && (
-          <div data-timeline-scroll className="min-h-screen">
-            {/* Query heading with Home & Share option */}
-            <div className="max-w-[700px] mx-auto px-4 pt-6 pb-2 flex items-center justify-between">
-              <h2 className="text-xl md:text-2xl font-bold text-white truncate max-w-[55%]">
-                Timeline for: <span className="gradient-text">{searchedQuery}</span>
-              </h2>
-              <div className="flex gap-2 shrink-0">
-                <button
-                  onClick={handleGoHome}
-                  className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-emerald-400">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                  </svg>
-                  Home
-                </button>
-                <button
-                  onClick={handleShareTimeline}
-                  className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-blue-400">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186 9.566-5.314m-9.566 7.5 9.566 5.314m0 0a2.25 2.25 0 1 0 3.935 2.186 2.25 2.25 0 0 0-3.935-2.186Zm0-12.814a2.25 2.25 0 1 0 3.933-2.185 2.25 2.25 0 0 0-3.933 2.185Z" />
-                  </svg>
-                  Share
-                </button>
-              </div>
-            </div>
-
-            {/* Loading */}
-            {loading && <SkeletonTimeline />}
-
-            {/* Error */}
-            {error && !loading && (
-              <div className="max-w-[700px] mx-auto px-4 py-16 text-center">
-                <div className="text-6xl mb-4">🔍</div>
-                <p className="text-gray-400 text-lg leading-relaxed mb-6">{error}</p>
-                <button
-                  onClick={handleGoHome}
-                  className="text-gray-400 hover:text-white bg-[#111] border border-[#2a2a2a] rounded-xl px-4 py-2 flex items-center gap-1.5 text-xs font-semibold transition-all hover:border-blue-500/30 cursor-pointer mx-auto"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5 text-emerald-400">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
-                  </svg>
-                  Go Home
-                </button>
-              </div>
-            )}
-
-            {/* Timeline */}
-            {!loading && !error && events.length > 0 && (
-              <Timeline
-                events={events}
-                onEventClick={handleEventClick}
-                onDigDeeper={handleDigDeeperTimeline}
-                diggingDeeper={diggingDeeper}
-                isBookmarked={isBookmarked}
-                onToggleBookmark={toggleBookmark}
-              />
-            )}
-          </div>
-        )}
-
-        {/* Home empty state decoration */}
-        {showHome && (
-          <div className="fixed bottom-32 md:bottom-20 left-0 right-0 text-center text-gray-600 text-sm animate-float" style={{ animationDelay: '500ms' }}>
-            <div className="flex items-center justify-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500/30"></span>
-              <span>Powered by AI & Gemini</span>
-              <span className="w-2 h-2 rounded-full bg-purple-500/30"></span>
-            </div>
-          </div>
+          </>
         )}
       </div>
 
@@ -516,6 +697,7 @@ export default function Home() {
             onRemoveBookmark={(id) => toggleBookmark({ id } as TimelineEvent)}
             onClearAll={clearAll}
             onEventClick={handleEventClick}
+            onShareWrapped={handleShareWrapped}
           />
         </div>
       )}
@@ -549,6 +731,7 @@ export default function Home() {
         activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
+          setCompareMode(false);
           if (tab === 'home') {
             setHasSearched(false);
             setEvents([]);
@@ -635,6 +818,17 @@ export default function Home() {
         <div className="fixed bottom-24 md:bottom-8 left-1/2 -translate-x-1/2 z-50 bg-[#161616] border border-blue-500/30 text-white px-5 py-2.5 rounded-full shadow-xl text-sm font-semibold animate-fadeSlideUp">
           {toastMessage}
         </div>
+      )}
+
+      {/* ===== ONBOARDING SHEET ===== */}
+      {showOnboarding && (
+        <OnboardingSheet
+          onSave={(profile) => {
+            setUserProfile(profile);
+            setShowOnboarding(false);
+            triggerToast('Preferences saved! Reordering timelines.');
+          }}
+        />
       )}
     </main>
   );

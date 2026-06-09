@@ -8,6 +8,7 @@ interface SavedEventsProps {
   onRemoveBookmark: (id: string) => void;
   onClearAll: () => void;
   onEventClick: (event: TimelineEvent) => void;
+  onShareWrapped?: () => void;
 }
 
 export default function SavedEvents({
@@ -15,6 +16,7 @@ export default function SavedEvents({
   onRemoveBookmark,
   onClearAll,
   onEventClick,
+  onShareWrapped,
 }: SavedEventsProps) {
   return (
     <div className="max-w-[700px] mx-auto px-4 py-8">
@@ -22,12 +24,22 @@ export default function SavedEvents({
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold text-white">Saved Events</h2>
         {bookmarks.length > 0 && (
-          <button
-            onClick={onClearAll}
-            className="text-red-400 hover:text-red-300 text-sm transition-colors"
-          >
-            Clear all
-          </button>
+          <div className="flex items-center gap-3">
+            {onShareWrapped && (
+              <button
+                onClick={onShareWrapped}
+                className="text-blue-400 hover:text-blue-300 text-xs font-semibold transition-colors flex items-center gap-1 bg-blue-500/10 border border-blue-500/20 px-3 py-1.5 rounded-xl cursor-pointer"
+              >
+                Share Wrapped 🎨
+              </button>
+            )}
+            <button
+              onClick={onClearAll}
+              className="text-red-400 hover:text-red-300 text-xs transition-colors cursor-pointer"
+            >
+              Clear all
+            </button>
+          </div>
         )}
       </div>
 
